@@ -138,7 +138,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		ClineProvider.activeInstances.add(this)
 		// 工作区监视器
 		this.workspaceTracker = new WorkspaceTracker(this)
-		// 基于 MCP 的 Typescript SDK 包，实现和 LLM 交互
+		// 支持接入 MCP 服务器，实现功能扩展
 		this.mcpHub = new McpHub(this)
 		// 基于 Firebase 的身份验证管理器
 		this.authManager = new FirebaseAuthManager(this)

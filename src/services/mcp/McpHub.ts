@@ -69,13 +69,15 @@ const McpSettingsSchema = z.object({
 })
 
 /**
- * Cline 基于 MCP 的 Typescript SDK 包，实现和 LLM 交互。
+ * Cline 基于 MCP 的 Typescript SDK 包实现的 Hub 类，支持接入 MCP 服务器，实现功能扩展。
+ * 插件的描述是：支持与本地运行的 MCP 服务器进行通信，这些服务器提供额外的工具和资源以扩展 Cline 的功能。可以使用社区创建的服务器，或者让 Cline 根据您的工作流程创建新的工具（例如，“添加一个获取最新 npm 文档的工具”）。
  *    - 创建 MCP 服务器，服务器可以暴露资源（server.resource）、提示（prompt）和工具（tool），以便客户端使用。
  *    - 创建 MCP 客户端，客户端能够连接到任何符合 MCP 规范的服务器。
  * TypeScript 形式的 MCP 服务器需要连接（connect）到传输（transport）以与客户端通信。Cline 选择了 stdio 传输（StdioClientTransport）。
  * 
  * Model Context Protocol（MCP）是一个用于在应用程序和 LLM 之间提供上下文的标准化协议。它旨在将上下文提供与实际的 LLM 交互分离，从而简化开发流程并提高灵活性。
  * @docs https://modelcontextprotocol.io/introduction
+ * @server https://github.com/modelcontextprotocol/servers
  */
 export class McpHub {
 	private providerRef: WeakRef<ClineProvider>
