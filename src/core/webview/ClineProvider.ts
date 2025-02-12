@@ -35,6 +35,10 @@ https://github.com/microsoft/vscode-webview-ui-toolkit-samples/blob/main/default
 https://github.com/KumarVariable/vscode-extension-sidebar-html/blob/master/src/customSidebarViewProvider.ts
 */
 
+/**
+ * `vscode.ExtensionContext.secrets` 是 SecretStorage 接口类型的实例，它允许扩展开发者 存储和检索敏感信息。
+ * SecretKey 是 Cline 定义的敏感信息 key 的类型。
+ */
 type SecretKey =
 	| "apiKey"
 	| "openRouterApiKey"
@@ -87,17 +91,32 @@ type GlobalStateKey =
 	| "requestyModelId"
 	| "togetherModelId"
 
+/** Cline 的全局文件名 */
 export const GlobalFileNames = {
+	/** 存放对话历史记录 */
 	apiConversationHistory: "api_conversation_history.json",
 	uiMessages: "ui_messages.json",
+	/** 存放 openrouter 的 LLM API 信息 */
 	openRouterModels: "openrouter_models.json",
+	/** 存放 Cline 的 MCP 设置文件 */
 	mcpSettings: "cline_mcp_settings.json",
 	clineRules: ".clinerules",
 }
 
+/**
+ * ClineProvider 实现了 vscode.WebviewViewProvider 接口，是 Cline 前后端服务的桥梁：
+ * 1. 创建插件的 Webview 视图。
+ * 2. 管理 Cline 实例的状态（只会存在一个）
+ * 3. 维护 Cline 与 Webview 之间的通信。
+ * 
+ * 在插件启动时创建一个 ClineProvider 实例，并在插件关闭时销毁该实例。
+ * 
+ * 通过 ClineProvider 实例，可以用两种方式创建一个 Cline 实例作为其私有属性，用于处理用户的任务请求。
+ */
 export class ClineProvider implements vscode.WebviewViewProvider {
 	public static readonly sideBarId = "claude-dev.SidebarProvider" // used in package.json as the view's id. This value cannot be changed due to how vscode caches views based on their id, and updating the id would break existing instances of the extension.
 	public static readonly tabPanelId = "claude-dev.TabPanelProvider"
+	/** ClineProvider 类的静态属性集合，用于存储所有已经创造的 ClineProvider 实例 */
 	private static activeInstances: Set<ClineProvider> = new Set()
 	private disposables: vscode.Disposable[] = []
 	private view?: vscode.WebviewView | vscode.WebviewPanel
@@ -107,14 +126,21 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	private authManager: FirebaseAuthManager
 	private latestAnnouncementId = "jan-20-2025" // update to some unique identifier when we add a new announcement
 
+	// 在实现 WebviewViewProvider 接口的类中自行定义构造函数，并根据需要传递参数
 	constructor(
+		// VSCode 插件上下文
 		readonly context: vscode.ExtensionContext,
+		// 使用 outputChannel 来输出调试信息
 		private readonly outputChannel: vscode.OutputChannel,
 	) {
 		this.outputChannel.appendLine("ClineProvider instantiated")
+		// 将当前 ClineProvider 实例添加到 activeInstances 中
 		ClineProvider.activeInstances.add(this)
+		// 工作区监视器
 		this.workspaceTracker = new WorkspaceTracker(this)
+		// 基于 MCP 的 Typescript SDK 包，实现和 LLM 交互
 		this.mcpHub = new McpHub(this)
+		// 基于 Firebase 的身份验证管理器
 		this.authManager = new FirebaseAuthManager(this)
 	}
 
@@ -156,10 +182,12 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
+	/** 以 "authToken" 为 key 存储 SecretStorage */
 	async setAuthToken(token?: string) {
 		await this.storeSecret("authToken", token)
 	}
 
+	/** 以 "userInfo" 为 key 存储 SecretStorage */
 	async setUserInfo(info?: { displayName: string | null; email: string | null; photoURL: string | null }) {
 		await this.updateGlobalState("userInfo", info)
 	}
@@ -179,6 +207,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		webviewView.webview.options = {
 			// Allow scripts in the webview
 			enableScripts: true,
+			// NOTE: 定义允许从本地文件系统加载资源的根目录列表。这些资源将被注入到 Webview 的内容中。
 			localResourceRoots: [this.context.extensionUri],
 		}
 		webviewView.webview.html = this.getHtmlContent(webviewView.webview)
@@ -293,6 +322,8 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	}
 
 	/**
+	 * NOTE: 定义并返回应该在插件的 webview 面板中呈现的 HTML。
+	 * 
 	 * Defines and returns the HTML that should be rendered within the webview panel.
 	 *
 	 * @remarks This is also the place where references to the React webview build files
@@ -368,6 +399,9 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	}
 
 	/**
+	 * NOTE: 设置一个事件侦听器来侦听从 webview 上下文传递的消息，并根据收到的消息执行代码。
+	 * 其实就是把 `webview.onDidReceiveMessage()` 封装了一层
+	 * 
 	 * Sets up an event listener to listen for messages passed from the webview context and
 	 * executes code based on the message that is received.
 	 *
@@ -881,6 +915,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 
 	// MCP
 
+	/** 获取不同操作系统的 "Documents" 的路径，目前只在 MCP 中用到  */
 	async getDocumentsPath(): Promise<string> {
 		if (process.platform === "win32") {
 			// If the user is running Win 7/Win Server 2008 r2+, we want to get the correct path to their Documents directory.
@@ -900,6 +935,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
+	/** 创造 ~/Documents/Cline/MCP 目录 */
 	async ensureMcpServersDirectoryExists(): Promise<string> {
 		const userDocumentsPath = await this.getDocumentsPath()
 		const mcpServersDir = path.join(userDocumentsPath, "Cline", "MCP")
@@ -911,6 +947,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		return mcpServersDir
 	}
 
+	/** 创造 [context.globalStorageUri.fsPath]/settings 目录 */
 	async ensureSettingsDirectoryExists(): Promise<string> {
 		const settingsDir = path.join(this.context.globalStorageUri.fsPath, "settings")
 		await fs.mkdir(settingsDir, { recursive: true })
@@ -1540,6 +1577,11 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
+	/**
+	 * 根据参数任务 id 更新历史记录
+	 * @param item 要更新的历史记录 HistoryItem
+	 * @returns 现在所有的历史记录
+	 */
 	async updateTaskHistory(item: HistoryItem): Promise<HistoryItem[]> {
 		const history = ((await this.getGlobalState("taskHistory")) as HistoryItem[]) || []
 		const existingItemIndex = history.findIndex((h) => h.id === item.id)
@@ -1584,6 +1626,13 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 
 	// secrets
 
+	/**
+	 * `vscode.ExtensionContext.secrets` 是 SecretStorage 接口类型的实例，
+	 * 它允许扩展开发者 存储和检索敏感信息。
+	 * get(key) 是获取；store(key, value) 是存储；delete(key) 是删除。
+	 * @param key Cline 定义的敏感信息的 key
+	 * @param value 为空时，删除 key 对应的敏感信息；不为空时，存储 key 对应的敏感信息
+	 */
 	private async storeSecret(key: SecretKey, value?: string) {
 		if (value) {
 			await this.context.secrets.store(key, value)
@@ -1592,6 +1641,13 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
+	/**
+	 * `vscode.ExtensionContext.secrets` 是 SecretStorage 接口类型的实例，
+	 * 它允许扩展开发者 存储和检索敏感信息。
+	 * get(key) 是获取；store(key, value) 是存储；delete(key) 是删除。
+	 * @param key Cline 定义的敏感信息的 key
+	 * @returns 返回 key 对应的敏感信息
+	 */
 	async getSecret(key: SecretKey) {
 		return await this.context.secrets.get(key)
 	}
