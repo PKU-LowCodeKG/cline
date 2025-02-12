@@ -317,6 +317,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	}
 
 	// Send any JSON serializable data to the react app
+	/** 向 WebView 发送 JSON 数据，前端需要监听 "message" 事件 */
 	async postMessageToWebview(message: ExtensionMessage) {
 		await this.view?.webview.postMessage(message)
 	}

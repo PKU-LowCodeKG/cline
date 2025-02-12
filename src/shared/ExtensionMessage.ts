@@ -85,6 +85,7 @@ export interface ClineMessage {
 	images?: string[]
 	partial?: boolean
 	lastCheckpointHash?: string
+	/** Cline Message 对应的 API 对话在 API 对话历史中的索引 */
 	conversationHistoryIndex?: number
 	conversationHistoryDeletedRange?: [number, number] // for when conversation history is truncated for API requests
 }

@@ -123,6 +123,7 @@ export const ExtensionStateContextProvider: React.FC<{
 		}
 	}, [])
 
+	/** 通过监听 "message" 事件，在 WebView 内接收来自插件的消息 */
 	useEvent("message", handleMessage)
 
 	useEffect(() => {
