@@ -79,6 +79,7 @@ export class Cline {
 	private browserSettings: BrowserSettings
 	private chatSettings: ChatSettings
 	apiConversationHistory: Anthropic.MessageParam[] = []
+	/** Cline Message 历史，用于 webview 呈现 */
 	clineMessages: ClineMessage[] = []
 	private clineIgnoreController: ClineIgnoreController
 	private askResponse?: ClineAskResponse
@@ -138,6 +139,7 @@ export class Cline {
 		this.autoApprovalSettings = autoApprovalSettings
 		this.browserSettings = browserSettings
 		this.chatSettings = chatSettings
+		// 【主线】如果存在历史记录，则从历史记录中恢复任务；否则，基于提供的 task 或者 images 创建新任务
 		if (historyItem) {
 			this.taskId = historyItem.id
 			this.conversationHistoryDeletedRange = historyItem.conversationHistoryDeletedRange
@@ -205,7 +207,7 @@ export class Cline {
 	}
 	// #endregion
 
-	// #region Cline Message 历史 [context.globalStorageUri.fsPath]/tasks/ui_messages.json
+	// #region Cline Message 历史（用于 webview 呈现） [context.globalStorageUri.fsPath]/tasks/ui_messages.json
 
 	/** 读取 uiMessages 文件中记录的 Cline Message 数组，只在 `resumeTaskFromHistory()` 中使用  */
 	private async getSavedClineMessages(): Promise<ClineMessage[]> {
@@ -224,6 +226,7 @@ export class Cline {
 		return []
 	}
 
+	/** 将一条 ClineMessage 存入消息数组，并设置它对应的 API 对话索引 */
 	private async addToClineMessages(message: ClineMessage) {
 		// these values allow us to reconstruct the conversation history at the time this cline message was created
 		// it's important that apiConversationHistory is initialized before we add cline messages
@@ -546,6 +549,12 @@ export class Cline {
 	// Communicate with webview
 
 	// partial has three valid states true (partial message), false (completion of partial message), undefined (individual complete message)
+	/**
+	 * partial 变量有三个有效的状态：
+	 *    - true：表示当前是一个部分消息，也就是说，这条消息还没有完整接收或处理，只有部分内容。
+	 *    - false：表示这条消息已经完成，即消息的内容已经完整地接收或处理完毕。
+	 *    - undefined：表示这条消息是一个独立的完整消息，即它是独立的、完整的，没有处于“部分消息”的状态。
+	 */
 	async ask(
 		type: ClineAsk,
 		text?: string,
@@ -567,6 +576,11 @@ export class Cline {
 		}
 		let askTs: number
 		if (partial !== undefined) {
+			// 如果 partial 为真，则
+			// 根据 ClineMessage 队列上一条消息的状态，判断当前的 ask 是否在更新 上一条“部分消息”
+			// 如果是，那么更新上一条“部分消息”。并向 webview 发送 "partialMessage"，附上更新后的上一条“部分消息”
+			// 如果不是，那么添加一条新的“部分消息”。并向 webview 发送当前的 插件状态
+			// 忽略当前 ask 请求
 			const lastMessage = this.clineMessages.at(-1)
 			const isUpdatingPreviousPartial =
 				lastMessage && lastMessage.partial && lastMessage.type === "ask" && lastMessage.ask === type
@@ -658,7 +672,10 @@ export class Cline {
 			await this.providerRef.deref()?.postStateToWebview()
 		}
 
+		// NOTE: pWaitFor 库等待 this.askResponse 不为 undefined 或者 this.lastMessageTs 不等于 askTs 这两个条件之一满足（每隔 100ms 检查一次）
 		await pWaitFor(() => this.askResponse !== undefined || this.lastMessageTs !== askTs, { interval: 100 })
+		// NOTE: 当前 ask 请求的时间戳与 发起请求时的时间戳不一致（即消息数组中最后一条消息的时间戳
+		// 说明 这是发送多个 ask 请求的场景中（例如 command_output 的情况）。此时，当前 ask 请求已经被后续请求覆盖，应该被忽略
 		if (this.lastMessageTs !== askTs) {
 			throw new Error("Current ask promise was ignored") // could happen if we send multiple asks in a row i.e. with command_output. It's important that when we know an ask could fail, it is handled gracefully
 		}
@@ -779,6 +796,12 @@ export class Cline {
 
 	// Task lifecycle
 
+	/**
+	 * 【主线】基于任务描述 task 或者 提供的图片 image 开始一个新任务
+	 * 1. 清空 Cline 实例的 对话历史（API）和 ClineMessage 消息（webview 显示）
+	 * 2. say("text", task, images)
+	 * 3. 初始化任务循环
+	 */
 	private async startTask(task?: string, images?: string[]): Promise<void> {
 		// conversationHistory (for API) and clineMessages (for webview) need to be in sync
 		// if the extension process were killed, then on restart the clineMessages might not be empty, so we need to set it to [] when we create a new Cline client (otherwise webview would show stale messages from previous session)
