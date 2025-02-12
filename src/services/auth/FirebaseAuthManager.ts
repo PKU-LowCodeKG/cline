@@ -2,6 +2,7 @@ import { initializeApp } from "firebase/app"
 import { Auth, User, getAuth, onAuthStateChanged, signInWithCustomToken, signOut } from "firebase/auth"
 import * as vscode from "vscode"
 import { ClineProvider } from "../../core/webview/ClineProvider"
+// Cline 将 Firebase 配置对象放在了 config.ts 文件
 import { firebaseConfig } from "./config"
 
 export interface UserInfo {
@@ -10,6 +11,12 @@ export interface UserInfo {
 	photoURL: string | null
 }
 
+/**
+ * Cline 基于 Firebase npm 包 实现的身份验证管理器。
+ * Firebase 是由 Google 开发的全面的后端服务平台，提供了一系列云计算服务。
+ * @docs https://firebase.google.com/docs/web/setup?hl=zh-cn
+ * @docs firebase/auth 官网文档 https://firebase.google.com/docs/reference/js/auth.md?hl=zh-cn
+ */
 export class FirebaseAuthManager {
 	private providerRef: WeakRef<ClineProvider>
 	private auth: Auth
@@ -18,11 +25,14 @@ export class FirebaseAuthManager {
 	constructor(provider: ClineProvider) {
 		console.log("Initializing FirebaseAuthManager", { provider })
 		this.providerRef = new WeakRef(provider)
+		// 初始化 Firebase 并创建一个 FirebaseApp 应用对象
 		const app = initializeApp(firebaseConfig)
+		// 返回与提供的 FirebaseApp 关联的 Auth 实例。
 		this.auth = getAuth(app)
 		console.log("Firebase app initialized", { appConfig: firebaseConfig })
 
 		// Auth state listener
+		// 为用户登录状态的变化添加观察器，当用户登录或退出时触发回调函数。
 		onAuthStateChanged(this.auth, this.handleAuthStateChange.bind(this))
 		console.log("Auth state change listener added")
 
@@ -30,6 +40,11 @@ export class FirebaseAuthManager {
 		this.restoreSession()
 	}
 
+	/**
+	 * 恢复会话。
+	 * 如果之前存在 Cline 存储的 token，则尝试使用该 token 登录到 Firebase。
+	 * 如果登录失败，则清除 token 和 用户信息。
+	 */
 	private async restoreSession() {
 		console.log("Attempting to restore session")
 		const provider = this.providerRef.deref()
@@ -54,6 +69,14 @@ export class FirebaseAuthManager {
 		}
 	}
 
+	/**
+	 * Cline 定义的 用户登录或退出时触发的 回调函数
+	 * 1. 根据用户是否登录，设置或者清除 Token 和 用户信息
+	 *    - 如果用户已登录，则将 Token 和 用户信息 存储在 provider 中
+	 *    - 如果用户已退出，则清除 Token 和 用户信息
+	 * 2. 更新 Webview 的状态
+	 * @param user 登陆状态发生改变的用户（当前用户），如果用户已退出，则为 null。
+	 */
 	private async handleAuthStateChange(user: User | null) {
 		console.log("Auth state changed", { user })
 		const provider = this.providerRef.deref()
@@ -78,6 +101,7 @@ export class FirebaseAuthManager {
 			await provider.setAuthToken(undefined)
 			await provider.setUserInfo(undefined)
 		}
+		// 更新 Webview 的状态
 		await provider.postStateToWebview()
 		console.log("Webview state updated")
 	}
