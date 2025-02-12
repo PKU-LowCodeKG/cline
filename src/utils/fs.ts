@@ -1,7 +1,13 @@
+/**
+ * "fs/promises" 是 TypeScript 的 fs 模块，和 Node.js 中的 fs 相近
+ * @docs API 文档：https://nodejs.cn/api/fs.html#fsaccesspath-mode-callback
+ */
 import fs from "fs/promises"
 import * as path from "path"
 
 /**
+ * NOTE: 异步为给定文件路径 创建所有不存在的子目录，并将它们收集到一个数组中以供以后删除。
+ * 
  * Asynchronously creates all non-existing subdirectories for a given file path
  * and collects them in an array for later deletion.
  *
@@ -32,6 +38,8 @@ export async function createDirectoriesForFile(filePath: string): Promise<string
 }
 
 /**
+ * NOTE: Cline 用 fs 检查路径是否存在。
+ * 
  * Helper function to check if a path exists.
  *
  * @param path - The path to check.
