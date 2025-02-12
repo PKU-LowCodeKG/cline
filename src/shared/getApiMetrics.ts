@@ -1,5 +1,6 @@
 import { ClineMessage } from "./ExtensionMessage"
 
+/** Cline 定义的 API 指标，一些数据会显示在前端的中 */
 interface ApiMetrics {
 	totalTokensIn: number
 	totalTokensOut: number
@@ -9,6 +10,12 @@ interface ApiMetrics {
 }
 
 /**
+ * NOTE: 为 ClineMessages 对象数组计算 API 指标。
+ * 
+ * 该函数处理已经通过 `combineApiRequests()` 函数合并了对应的 'api_req_finished' 消息的 'api_req_started' 消息。
+ * 它还考虑了从已删除消息中聚合的 'deleted_api_reqs' 消息。
+ * 从这些消息中提取并汇总 tokensIn、tokensOut、cacheWrites、cacheReads 和 cost。
+ * 
  * Calculates API metrics from an array of ClineMessages.
  *
  * This function processes 'api_req_started' messages that have been combined with their

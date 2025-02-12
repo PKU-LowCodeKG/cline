@@ -1,6 +1,16 @@
 import { ClineMessage } from "./ExtensionMessage"
 
 /**
+ * NOTE: 将 ClineMessages 对象数组中，每条 command 和它后面连续的 command_output 消息合并成一个新的 command 消息。
+ * 
+ * 这个函数在 参数 messages 代表的 ClineMessages 对象数组中：
+ * 1. 寻找属性 ask 或者 say 为 "command" 的 ClineMessage；
+ * 如果这个 ClineMessage[i] 后跟着 ≥1 个属性 ask 或者 say 为 "command_output" 的 ClineMessage[j]。
+ * 合并这些 ClineMessage[j] 的文本内容到 ClineMessage[i] 上，组合成一个消息。
+ * 将这些组合后的消息放入一个新的数组 combinedCommands。
+ * 2. 遍历原数组，删除属性 ask 或者 say 为 "command_output" 的 ClineMessage。
+ * 将原数组中的属性 ask 或者 say 为 "command" 的 ClineMessage 替换为 combinedCommands 中组合后的消息。
+ * 
  * Combines sequences of command and command_output messages in an array of ClineMessages.
  *
  * This function processes an array of ClineMessages objects, looking for sequences

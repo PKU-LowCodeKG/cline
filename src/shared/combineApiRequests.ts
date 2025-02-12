@@ -1,6 +1,8 @@
 import { ClineMessage } from "./ExtensionMessage"
 
 /**
+ * NOTE: 将 ClineMessages 对象数组中，成对的 api_req_started 和 api_req_finished 消息合并成一个新的 api_req_started 消息。
+ * 
  * Combines API request start and finish messages in an array of ClineMessages.
  *
  * This function looks for pairs of 'api_req_started' and 'api_req_finished' messages.
