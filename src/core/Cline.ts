@@ -161,6 +161,7 @@ export class Cline {
 
 	// Storing task to disk for history
 
+	/** 创造 [context.globalStorageUri.fsPath]/tasks 目录 */
 	private async ensureTaskDirectoryExists(): Promise<string> {
 		const globalStoragePath = this.providerRef.deref()?.context.globalStorageUri.fsPath
 		if (!globalStoragePath) {
@@ -170,6 +171,9 @@ export class Cline {
 		await fs.mkdir(taskDir, { recursive: true })
 		return taskDir
 	}
+
+	// #region LLM API 对话历史 [context.globalStorageUri.fsPath]/tasks/api_conversation_history.json
+	// FIXME 这里的 API 对话历史均为 Anthropic.MessageParam[] ，其他 LLM API 是否需要转化？
 
 	private async getSavedApiConversationHistory(): Promise<Anthropic.MessageParam[]> {
 		const filePath = path.join(await this.ensureTaskDirectoryExists(), GlobalFileNames.apiConversationHistory)
@@ -199,7 +203,11 @@ export class Cline {
 			console.error("Failed to save API conversation history:", error)
 		}
 	}
+	// #endregion
 
+	// #region Cline Message 历史 [context.globalStorageUri.fsPath]/tasks/ui_messages.json
+
+	/** 读取 uiMessages 文件中记录的 Cline Message 数组，只在 `resumeTaskFromHistory()` 中使用  */
 	private async getSavedClineMessages(): Promise<ClineMessage[]> {
 		const filePath = path.join(await this.ensureTaskDirectoryExists(), GlobalFileNames.uiMessages)
 		if (await fileExistsAtPath(filePath)) {
@@ -230,18 +238,22 @@ export class Cline {
 		await this.saveClineMessages()
 	}
 
+	/** TODO: 这里不太懂，貌似只是更新了相关任务 的时间戳、API 消耗指标等 */
 	private async saveClineMessages() {
 		try {
 			const taskDir = await this.ensureTaskDirectoryExists()
 			const filePath = path.join(taskDir, GlobalFileNames.uiMessages)
 			await fs.writeFile(filePath, JSON.stringify(this.clineMessages))
 			// combined as they are in ChatView
+			// NOTE: 在不影响原数组内容的前提下，计算 ClineMessages 数组的 API 指标
 			const apiMetrics = getApiMetrics(combineApiRequests(combineCommandSequences(this.clineMessages.slice(1))))
 			const taskMessage = this.clineMessages[0] // first message is always the task say
+			// NOTE: 找到最后一个 ask 属性不是 resume_task 或 resume_completed_task 的消息，用这个消息的时间戳作为历史记录的时间戳
 			const lastRelevantMessage =
 				this.clineMessages[
 					findLastIndex(this.clineMessages, (m) => !(m.ask === "resume_task" || m.ask === "resume_completed_task"))
 				]
+			// NOTE: 计算 当前任务目录 tasks 的大小
 			let taskDirSize = 0
 			try {
 				// getFolderSize.loose silently ignores errors
@@ -267,6 +279,7 @@ export class Cline {
 			console.error("Failed to save cline messages:", error)
 		}
 	}
+	// #endregion
 
 	async restoreCheckpoint(messageTs: number, restoreType: ClineCheckpointRestore) {
 		const messageIndex = this.clineMessages.findIndex((m) => m.ts === messageTs)
@@ -542,6 +555,12 @@ export class Cline {
 		text?: string
 		images?: string[]
 	}> {
+		// NOTE: 这段话是说：
+		// 如果 Cline 实例被 Clineprovider 中止，尽管 Cline 实例本身不再活跃，但之相关的异步任务（a promise）仍然存在并在后台执行；
+		// 因为这个任务已经附加到了新的 Cline 实例上（Clineprovider 只维护一个 Cline），所以我们不希望将其结果发送到当前 webview 界面；
+		// 因此，我们可以安全地忽略任何依然活跃的 promise 的结果，这个 Cline 类将被释放。
+		// （尽管我们在提供者中设置了 Cline = undefined，但这只是删除对此实例的引用，实例仍然存在，只有当所有对该实例的引用都被清除且它所涉及的所有异步操作都完成了，这个实例才会被垃圾回收机制自动清理掉。）
+
 		// If this Cline instance was aborted by the provider, then the only thing keeping us alive is a promise still running in the background, in which case we don't want to send its result to the webview as it is attached to a new instance of Cline now. So we can safely ignore the result of any active promises, and this class will be deallocated. (Although we set Cline = undefined in provider, that simply removes the reference to this instance, but the instance is still alive until this promise resolves or rejects.)
 		if (this.abort) {
 			throw new Error("Cline instance aborted")

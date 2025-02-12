@@ -1,5 +1,6 @@
 export type HistoryItem = {
 	id: string
+	/** 历史记录的时间戳 timestamp */
 	ts: number
 	task: string
 	tokensIn: number
