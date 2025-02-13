@@ -284,6 +284,7 @@ export class Cline {
 	}
 	// #endregion
 
+	// #region Checkpoint 的恢复和保存，用于实现 diff 功能
 	async restoreCheckpoint(messageTs: number, restoreType: ClineCheckpointRestore) {
 		const messageIndex = this.clineMessages.findIndex((m) => m.ts === messageTs)
 		const message = this.clineMessages[messageIndex]
@@ -545,6 +546,7 @@ export class Cline {
 
 		return false
 	}
+	// #endregion
 
 	// Communicate with webview
 

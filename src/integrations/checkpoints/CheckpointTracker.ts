@@ -1,12 +1,21 @@
 import fs from "fs/promises"
 import os from "os"
 import * as path from "path"
+// simpleGit 是一个轻量化的在 node.js 中使用 git 接口的库
 import simpleGit, { SimpleGit } from "simple-git"
 import * as vscode from "vscode"
 import { ClineProvider } from "../../core/webview/ClineProvider"
 import { fileExistsAtPath } from "../../utils/fs"
 import { globby } from "globby"
 
+/**
+ * Cline 实例的 Checkpoint 管理器，基于 simpleGit 实现。
+ * 
+ * 它是 Cline 实例的工具类，作为 Cline 实例的一个属性，用于管理 Checkpoint 的创建、提交、重置等操作。
+ * 
+ * 路径为 [context.globalStorageUri.fsPath]/tasks/[taskId]/checkpoints/.git
+ * @docs simpleGit https://www.npmjs.com/package/simple-git
+ */
 class CheckpointTracker {
 	private providerRef: WeakRef<ClineProvider>
 	private taskId: string
@@ -16,11 +25,19 @@ class CheckpointTracker {
 	lastCheckpointHash?: string
 
 	private constructor(provider: ClineProvider, taskId: string, cwd: string) {
+		/** 引用的 ClineProvider 实例 */
 		this.providerRef = new WeakRef(provider)
+		/** CheckpointTracker 所属的 Cline 实例绑定的任务 id */
 		this.taskId = taskId
 		this.cwd = cwd
 	}
 
+	/**
+	 * 创建 CheckpointTracker 实例
+	 * @param taskId CheckpointTracker 所属的 Cline 实例绑定的任务 id
+	 * @param provider 引用的 ClineProvider 实例
+	 * @returns 
+	 */
 	public static async create(taskId: string, provider?: ClineProvider): Promise<CheckpointTracker | undefined> {
 		try {
 			if (!provider) {
@@ -28,6 +45,7 @@ class CheckpointTracker {
 			}
 
 			// Check if checkpoints are disabled in VS Code settings
+			/** 这个在 Cline 插件 “设置-高级设置” 打开 VSCode 的设置面板 */
 			const enableCheckpoints = vscode.workspace.getConfiguration("cline").get<boolean>("enableCheckpoints") ?? true
 			if (!enableCheckpoints) {
 				return undefined // Don't create tracker when disabled
@@ -50,6 +68,11 @@ class CheckpointTracker {
 		}
 	}
 
+	/**
+	 * CheckpointTracker 中获得当前工作目录的私有静态方法。
+	 * 如果当前工作目录不是 家目录、桌面、文档、下载，返回当前工作目录。
+	 * @returns 当前工作目录 string cwd
+	 */
 	private static async getWorkingDirectory(): Promise<string> {
 		const cwd = vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath).at(0)
 		if (!cwd) {
@@ -74,6 +97,7 @@ class CheckpointTracker {
 		}
 	}
 
+	/** 返回路径：[context.globalStorageUri.fsPath]/tasks/[taskId]/checkpoints/.git */
 	private async getShadowGitPath(): Promise<string> {
 		const globalStoragePath = this.providerRef.deref()?.context.globalStorageUri.fsPath
 		if (!globalStoragePath) {
@@ -85,6 +109,7 @@ class CheckpointTracker {
 		return gitPath
 	}
 
+	/** 判断路径是否存在：[context.globalStorageUri.fsPath]/tasks/[taskId]/checkpoints/.git */
 	public static async doesShadowGitExist(taskId: string, provider?: ClineProvider): Promise<boolean> {
 		const globalStoragePath = provider?.context.globalStorageUri.fsPath
 		if (!globalStoragePath) {
@@ -238,6 +263,7 @@ class CheckpointTracker {
 		}
 	}
 
+	/** 获得当前 CheckpointTracker 的 git WorkTree */
 	public async getShadowGitConfigWorkTree(): Promise<string | undefined> {
 		if (this.lastRetrievedShadowGitConfigWorkTree) {
 			return this.lastRetrievedShadowGitConfigWorkTree
