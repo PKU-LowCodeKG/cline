@@ -329,6 +329,7 @@ export class Cline {
 			case "workspace":
 				if (!this.checkpointTracker) {
 					try {
+						/** 创建 CheckpointTracker 实例 */
 						this.checkpointTracker = await CheckpointTracker.create(this.taskId, this.providerRef.deref())
 						this.checkpointTrackerErrorMessage = undefined
 					} catch (error) {
@@ -342,7 +343,7 @@ export class Cline {
 				}
 				if (message.lastCheckpointHash && this.checkpointTracker) {
 					try {
-						// 调用 CheckpointTracker 的 resetHead 方法
+						// 调用 CheckpointTracker 的 resetHead 方法 定位到指定的提交
 						await this.checkpointTracker.resetHead(message.lastCheckpointHash)
 					} catch (error) {
 						const errorMessage = error instanceof Error ? error.message : "Unknown error"
