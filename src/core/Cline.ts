@@ -303,6 +303,15 @@ export class Cline {
 	// #endregion
 
 	// #region Checkpoint 的恢复和保存，用于实现 diff 功能
+
+	/**
+	 * 恢复到指定的时间点。
+	 * 
+	 * 该函数根据提供的消息时间戳查找对应的消息，并根据指定的恢复类型执行恢复操作。
+	 * ClineProvider 中 监听到"checkpointRestore" 使用
+	 * @param messageTs - 要恢复到的消息的时间戳。
+	 * @param restoreType - 恢复类型，可以是 "task"（任务）、"workspace"（工作区）或 "taskAndWorkspace"（任务和工作区）。
+	 */
 	async restoreCheckpoint(messageTs: number, restoreType: ClineCheckpointRestore) {
 		const messageIndex = this.clineMessages.findIndex((m) => m.ts === messageTs)
 		const message = this.clineMessages[messageIndex]
@@ -333,6 +342,7 @@ export class Cline {
 				}
 				if (message.lastCheckpointHash && this.checkpointTracker) {
 					try {
+						// 调用 CheckpointTracker 的 resetHead 方法
 						await this.checkpointTracker.resetHead(message.lastCheckpointHash)
 					} catch (error) {
 						const errorMessage = error instanceof Error ? error.message : "Unknown error"
@@ -390,7 +400,9 @@ export class Cline {
 
 			// Set isCheckpointCheckedOut flag on the message
 			// Find all checkpoint messages before this one
+			// 设置 isCheckpointCheckedOut 标志
 			const checkpointMessages = this.clineMessages.filter((m) => m.say === "checkpoint_created")
+			/**找到待查找时间戳的检查点 */
 			const currentMessageIndex = checkpointMessages.findIndex((m) => m.ts === messageTs)
 
 			// Set isCheckpointCheckedOut to false for all checkpoint messages
@@ -407,13 +419,22 @@ export class Cline {
 			await this.providerRef.deref()?.postMessageToWebview({ type: "relinquishControl" })
 		}
 	}
-
+	/**
+	 * 展示多文件差异。
+	 * 该函数根据特定的消息时间戳向用户展示多个文件的差异。
+	 * 可以选择显示自上次任务完成以来的所有更改，或显示自某个快照以来的更改。
+	 * 在ClineProvider中 "checkpointDiff" 调用
+	 *
+	 * @param messageTs - 消息的时间戳，用于标识要查看差异的消息。
+	 * @param seeNewChangesSinceLastTaskCompletion - 布尔值，指示是否显示自上次任务完成以来的新更改。
+	 */
 	async presentMultifileDiff(messageTs: number, seeNewChangesSinceLastTaskCompletion: boolean) {
 		const relinquishButton = () => {
 			this.providerRef.deref()?.postMessageToWebview({ type: "relinquishControl" })
 		}
 
 		console.log("presentMultifileDiff", messageTs)
+		/** 根据时间戳找到对应消息 */
 		const messageIndex = this.clineMessages.findIndex((m) => m.ts === messageTs)
 		const message = this.clineMessages[messageIndex]
 		if (!message) {
@@ -443,7 +464,7 @@ export class Cline {
 				return
 			}
 		}
-
+		/** 包含文件的相对路径 绝对路径 和在不同状态下的内容 */
 		let changedFiles:
 			| {
 					relativePath: string
@@ -456,6 +477,7 @@ export class Cline {
 		try {
 			if (seeNewChangesSinceLastTaskCompletion) {
 				// Get last task completed
+				// 展上次任务完成时的哈希到当前哈希之间的差异
 				const lastTaskCompletedMessage = findLast(
 					this.clineMessages.slice(0, messageIndex),
 					(m) => m.say === "completion_result",
@@ -519,7 +541,11 @@ export class Cline {
 		)
 		relinquishButton()
 	}
-
+	/**
+	 * 异步检查最新的任务完成是否包含与上次完成相比的新更改。
+	 * 
+	 * @returns {Promise<boolean>} - 如果有新的更改返回 `true`，否则返回 `false`。
+	 */
 	async doesLatestTaskCompletionHaveNewChanges() {
 		const messageIndex = findLastIndex(this.clineMessages, (m) => m.say === "completion_result")
 		const message = this.clineMessages[messageIndex]
@@ -1186,10 +1212,18 @@ export class Cline {
 	// #endregion
 
 	// Checkpoints
-
+	/**
+	 * 保存检查点的异步方法。
+	 * 
+	 * 此方法会尝试提交一个检查点，并根据不同情况更新聊天消息中的检查点信息。
+	 * 
+	 * @param {boolean} [isAttemptCompletionMessage=false] - 指示是否将当前操作视为尝试完成消息的操作。
+	 *                                                    
+	 */
 	async saveCheckpoint(isAttemptCompletionMessage: boolean = false) {
 		const commitHash = await this.checkpointTracker?.commit() // silently fails for now
 		// Set isCheckpointCheckedOut to false for all checkpoint_created messages
+		//表示这些检查点不再处于检出状态
 		this.clineMessages.forEach((message) => {
 			if (message.say === "checkpoint_created") {
 				message.isCheckpointCheckedOut = false
@@ -1198,14 +1232,19 @@ export class Cline {
 		if (commitHash) {
 			if (!isAttemptCompletionMessage) {
 				// For non-attempt completion we just say checkpoints
+				//对于非尝试完成消息的操作，发送消息
 				await this.say("checkpoint_created", commitHash)
+				/** 最后一个 say 属性为 checkpoint_created 的消息*/
 				const lastCheckpointMessage = findLast(this.clineMessages, (m) => m.say === "checkpoint_created")
 				if (lastCheckpointMessage) {
+					// 赋值： 当前提交的哈希值
 					lastCheckpointMessage.lastCheckpointHash = commitHash
 					await this.saveClineMessages()
 				}
 			} else {
 				// For attempt_completion, find the last completion_result message and set its checkpoint hash. This will be used to present the 'see new changes' button
+				//对于尝试完成的操作 查找最后一个 say 属性为 "completion_result" 或者 ask 属性为 "completion_result" 的聊天消息
+				// 这个消息将用于显示 "查看新更改" 按钮。
 				const lastCompletionResultMessage = findLast(
 					this.clineMessages,
 					(m) => m.say === "completion_result" || m.ask === "completion_result",
@@ -2948,6 +2987,7 @@ export class Cline {
 									if (lastMessage && lastMessage.ask !== "command") {
 										// havent sent a command message yet so first send completion_result then command
 										await this.say("completion_result", result, undefined, false)
+										//  任务完成或尝试完成 创建一个CheckPoint
 										await this.saveCheckpoint(true)
 										await addNewChangesFlagToLastCompletionResultMessage()
 									} else {
