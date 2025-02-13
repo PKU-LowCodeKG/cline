@@ -3396,22 +3396,37 @@ export class Cline {
 		])
 	}
 
+	/**
+	 * 【主线】收集、生成当前开发环境的详细信息，并返回。这个函数返回的文本用于 LLM API 对话
+	 * 1. 获取当前可见的编辑器（即用户正在查看的文件）过滤掉不需要的路径。然后将路径转换为 POSIX 风格
+	 * 2. 获取所有的标签页（包括所有分组的标签），然后提取每个标签的文件路径。过滤掉不需要的路径。然后将路径转换为 POSIX 风格
+	 * 3. 如果有正在运行的终端，等待他们操作完成，遍历这些终端并获取它们的输出
+	 * 4. 如果有空闲终端，获取它们的输出
+	 * 5. 获取当前时间并格式化
+	 * 6. 如果 includeFileDetails 为 true，则获取当前工作目录下的文件列表。
+	 * 7. 根据 "plan" 模式或 "act" 模式 增加对应的补充提示信息
+	 * @param includeFileDetails 是否包括当前工作目录下的文件列表。
+	 * @returns 被 `<environment_details>` 包裹的格式化字符串
+	 */
 	async getEnvironmentDetails(includeFileDetails: boolean = false) {
 		let details = ""
 
 		// It could be useful for cline to know if the user went from one or no file to another between messages, so we always include this context
 		details += "\n\n# VSCode Visible Files"
+		// 获取当前可见的编辑器（即用户正在查看的文件），并将每个文件的绝对路径转换为相对路径。
 		const visibleFilePaths = vscode.window.visibleTextEditors
 			?.map((editor) => editor.document?.uri?.fsPath)
 			.filter(Boolean)
 			.map((absolutePath) => path.relative(cwd, absolutePath))
 
 		// Filter paths through clineIgnoreController
+		// 过滤掉不需要的路径。然后将路径转换为 POSIX 风格，并将所有路径按行连接成一个字符串
 		const allowedVisibleFiles = this.clineIgnoreController
 			.filterPaths(visibleFilePaths)
 			.map((p) => p.toPosix())
 			.join("\n")
 
+		// 如果有可见文件，添加到 details 中；否则，输出 “(No visible files)”。这样，cline 就可以知道用户在查看哪些文件。
 		if (allowedVisibleFiles) {
 			details += `\n${allowedVisibleFiles}`
 		} else {
@@ -3419,6 +3434,7 @@ export class Cline {
 		}
 
 		details += "\n\n# VSCode Open Tabs"
+		// 获取所有的标签页（包括所有分组的标签），然后提取每个标签的文件路径。
 		const openTabPaths = vscode.window.tabGroups.all
 			.flatMap((group) => group.tabs)
 			.map((tab) => (tab.input as vscode.TabInputText)?.uri?.fsPath)
@@ -3437,16 +3453,18 @@ export class Cline {
 			details += "\n(No open tabs)"
 		}
 
+		// getTerminals(true) 获取正在运行的终端（忙碌的终端），getTerminals(false) 获取空闲的终端。
 		const busyTerminals = this.terminalManager.getTerminals(true)
 		const inactiveTerminals = this.terminalManager.getTerminals(false)
 		// const allTerminals = [...busyTerminals, ...inactiveTerminals]
 
+		// 如果有忙碌的终端并且文件已编辑，则延迟 300 毫秒以确保文件已保存，给终端一些时间来处理相关操作。
 		if (busyTerminals.length > 0 && this.didEditFile) {
-			//  || this.didEditFile
 			await delay(300) // delay after saving file to let terminals catch up
 		}
 
 		// let terminalWasBusy = false
+		// 如果有忙碌的终端，等待直到它们的进程不再繁忙。使用 pWaitFor 轮询每个终端的状态，最多等待 15 秒。
 		if (busyTerminals.length > 0) {
 			// wait for terminals to cool down
 			// terminalWasBusy = allTerminals.some((t) => this.terminalManager.isProcessHot(t.id))
@@ -3476,6 +3494,7 @@ export class Cline {
 		this.didEditFile = false // reset, this lets us know when to wait for saved files to update terminals
 
 		// waiting for updated diagnostics lets terminal output be the most up-to-date possible
+		// 如果有正在运行的终端，遍历这些终端并获取它们的输出（如果有的话），并将它们添加到 terminalDetails 中
 		let terminalDetails = ""
 		if (busyTerminals.length > 0) {
 			// terminals are cool, let's retrieve their output
@@ -3491,6 +3510,7 @@ export class Cline {
 			}
 		}
 		// only show inactive terminals if there's output to show
+		// 如果有空闲终端，获取它们的输出并添加到 terminalDetails 中。
 		if (inactiveTerminals.length > 0) {
 			const inactiveTerminalOutputs = new Map<number, string>()
 			for (const inactiveTerminal of inactiveTerminals) {
@@ -3523,6 +3543,7 @@ export class Cline {
 		}
 
 		// Add current time information with timezone
+		// 获取当前时间并使用 Intl.DateTimeFormat 格式化时间，包含年、月、日、小时、分钟和秒。还会附带时区信息，展示当前的时区偏移。
 		const now = new Date()
 		const formatter = new Intl.DateTimeFormat(undefined, {
 			year: "numeric",
@@ -3538,6 +3559,9 @@ export class Cline {
 		const timeZoneOffsetStr = `${timeZoneOffset >= 0 ? "+" : ""}${timeZoneOffset}:00`
 		details += `\n\n# Current Time\n${formatter.format(now)} (${timeZone}, UTC${timeZoneOffsetStr})`
 
+		// 如果 includeFileDetails 为 true，则获取当前工作目录下的文件列表。
+		// 若工作目录是桌面，则不直接展示桌面文件，提示用户使用 "list_files" 这个工具调用（tool_use）来查看。
+		// 否则，用 `listFiles()` 函数列出最多 200 个文件
 		if (includeFileDetails) {
 			details += `\n\n# Current Working Directory (${cwd.toPosix()}) Files\n`
 			const isDesktop = arePathsEqual(cwd, path.join(os.homedir(), "Desktop"))
@@ -3552,6 +3576,9 @@ export class Cline {
 		}
 
 		details += "\n\n# Current Mode"
+		// 根据 chatSettings.mode 的值，决定是否处于 "plan" 模式或 "act" 模式。
+		// 如果是 "plan" 模式，则输出相关的模式说明，提醒用户在此模式下主要是信息收集和方案设计。
+		// 如果是 "act" 模式，输出相应的状态。
 		if (this.chatSettings.mode === "plan") {
 			details += "\nPLAN MODE"
 			details +=
