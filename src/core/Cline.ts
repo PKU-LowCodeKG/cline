@@ -82,6 +82,7 @@ export class Cline {
 	private terminalManager: TerminalManager
 	private urlContentFetcher: UrlContentFetcher
 	browserSession: BrowserSession
+	/** 当前 Cline 实例的任务是否已经编辑过文件 */
 	private didEditFile: boolean = false
 	customInstructions?: string
 	autoApprovalSettings: AutoApprovalSettings
@@ -96,7 +97,7 @@ export class Cline {
 	private askResponseImages?: string[]
 	private lastMessageTs?: number
 	private consecutiveAutoApprovedRequestsCount: number = 0
-	/** 连续发生的错误计数器 */
+	/** 连续发生的错误计数器（指思考失败？答复失败？没有采用工具调用？） */
 	private consecutiveMistakeCount: number = 0
 	private providerRef: WeakRef<ClineProvider>
 	private abort: boolean = false
@@ -150,6 +151,7 @@ export class Cline {
 		this.browserSettings = browserSettings
 		this.chatSettings = chatSettings
 		// 【主线】如果存在历史记录，则从历史记录中恢复任务；否则，基于提供的 task 或者 images 创建新任务
+		// 根据 ClineProvider 是否传入了 historyItem 来区分
 		if (historyItem) {
 			this.taskId = historyItem.id
 			this.conversationHistoryDeletedRange = historyItem.conversationHistoryDeletedRange
@@ -573,8 +575,8 @@ export class Cline {
 	 * 在向用户询问后，使用 pWaitFor 库等待用户答复
 	 * 
 	 * Cline askResponse 是用户在前端对 Cline ask 的回应：“接受”按钮、“拒绝”按钮、还是文本框输入答复。
-	 * 无论是哪一种，都是通过 `vscode.postMessage()` 给后端传递 "askResponse" 类型消息，再由 ClineProvider 定义的 onDidReceiveMessage 处理，设置 Cline 实例的 askResponse 3 个属性。
-	 * 
+	 * 无论是哪一种，都是通过 `vscode.postMessage()` 给后端传递 "askResponse" 类型消息，再由 ClineProvider 定义的 onDidReceiveMessage 处理。
+	 * 由 `handleWebviewAskResponse()` 函数设置 Cline 实例的 askResponse 3 个属性。
 	 * 
 	 * partial 变量有三个有效的状态：
 	 *    - true：表示当前是一个部分消息，也就是说，这条消息还没有完整接收或处理，只有部分内容。
@@ -822,6 +824,7 @@ export class Cline {
 
 	// Task lifecycle
 
+	// #region Cline 实例中 Task 的生命周期：开始新任务/恢复并继续旧任务、中断当前任务
 	/**
 	 * 【主线】基于任务描述 task 或者 提供的图片 image 开始一个新任务
 	 * 1. 清空 Cline 实例的 对话历史（API）和 ClineMessage 消息（webview 显示）
@@ -941,6 +944,7 @@ export class Cline {
 		// FIXME: 这里不详细解读如何进行 工具使用块 的替换
 		const conversationWithoutToolBlocks = existingApiConversationHistory.map((message) => {
 			if (Array.isArray(message.content)) {
+				// API 对话对象的 "content" 数组
 				const newContent = message.content.map((block) => {
 					if (block.type === "tool_use") {
 						// it's important we convert to the new tool schema format so the model doesn't get confused about how to invoke tools
@@ -1127,9 +1131,10 @@ export class Cline {
 	 */
 	private async initiateTaskLoop(userContent: UserContent, isNewTask: boolean): Promise<void> {
 		let nextUserContent = userContent
+		// 是否包括当前工作目录下的文件列表
 		let includeFileDetails = true
 		while (!this.abort) {
-			// NOTE: 只在最开始的时候需要用 tree-sitter 解析文件详情，之后不再需要
+			// NOTE: 只在最开始的时候（while 的第一次循环，下面这个函数的第一层递归） 包括当前工作目录下的文件列表。
 			const didEndLoop = await this.recursivelyMakeClineRequests(nextUserContent, includeFileDetails, isNewTask)
 			includeFileDetails = false // we only need file details the first time
 
@@ -1147,6 +1152,7 @@ export class Cline {
 				// 	"tool",
 				// 	"Cline responded with only text blocks but has not called attempt_completion yet. Forcing him to continue with task..."
 				// )
+				// NOTE: `recursivelyMakeClineRequests()` 结束但是返回了 false（即 没有调用 attempt_completion 工具），记录一次错误，利用外层 while 循环继续执行任务
 				nextUserContent = [
 					{
 						type: "text",
