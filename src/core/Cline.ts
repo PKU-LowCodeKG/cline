@@ -3070,6 +3070,13 @@ export class Cline {
 		}
 	}
 
+	/**
+	 * 【主线】递归地发出 Cline 请求
+	 * 
+	 * includeFileDetails 是否包括当前工作目录下的文件列表。
+	 * 只在最开始的时候（while 的第一次循环，本函数的第一层递归）为 true
+	 * @returns 是否继续循环的 bool，用于终止父循环
+	 */
 	async recursivelyMakeClineRequests(
 		userContent: UserContent,
 		includeFileDetails: boolean = false,
@@ -3107,7 +3114,7 @@ export class Cline {
 			this.consecutiveMistakeCount = 0
 		}
 
-		/** 处理 Cline 在获得用户自动授权时，依然连续发生错误的情况（指思考失败？答复失败？没有采用工具调用？） */
+		/** 处理 Cline 在获得用户自动授权审批时，依然连续发生错误的情况（指思考失败？答复失败？没有采用工具调用？） */
 		if (
 			this.autoApprovalSettings.enabled &&
 			this.consecutiveAutoApprovedRequestsCount >= this.autoApprovalSettings.maxRequests
@@ -3127,6 +3134,7 @@ export class Cline {
 		}
 
 		// get previous api req's index to check token usage and determine if we need to truncate conversation history
+		/** 获取上一个 api_req_started 在 ClineMessage 数组中的索引，以检查 token 使用情况并确定是否需要截断对话历史记录 */ 
 		const previousApiReqIndex = findLastIndex(this.clineMessages, (m) => m.say === "api_req_started")
 
 		// Save checkpoint if this is the first API request
@@ -3264,6 +3272,7 @@ export class Cline {
 			this.didAutomaticallyRetryFailedApiRequest = false
 			await this.diffViewProvider.reset()
 
+			// NOTE: 处理 LLM 的流式结果
 			const stream = this.attemptApiRequest(previousApiReqIndex) // yields only if the first chunk is successful, otherwise will allow the user to retry the request (most likely due to rate limit error, which gets thrown on the first chunk)
 			let assistantMessage = ""
 			let reasoningMessage = ""
@@ -3329,6 +3338,7 @@ export class Cline {
 					}
 				}
 			} catch (error) {
+				// NOTE: abandoned 和 abort 的区别是，abandoned 是当扩展不再等待 cline 实例完成中止时发生的（当循环中的任何函数由于 this.abort 而抛出错误时，此处会抛出错误）
 				// abandoned happens when extension is no longer waiting for the cline instance to finish aborting (error is thrown here when any function in the for loop throws due to this.abort)
 				if (!this.abandoned) {
 					this.abortTask() // if the stream failed, there's various states the task could be in (i.e. could have streamed some tools the user may have executed), so we just resort to replicating a cancel task
