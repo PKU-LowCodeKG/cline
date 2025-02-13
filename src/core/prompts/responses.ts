@@ -17,6 +17,7 @@ export const formatResponse = {
 	clineIgnoreError: (path: string) =>
 		`Access to ${path} is blocked by the .clineignore file settings. You must try to continue in the task without using this file, or ask the user to update the .clineignore file.`,
 
+	/** 在 response 中并没有进行工具调用的 [ERROR] */
 	noToolsUsed: () =>
 		`[ERROR] You did not use a tool in your previous response! Please retry with a tool use.
 
@@ -144,6 +145,7 @@ const formatImagesIntoBlocks = (images?: string[]): Anthropic.ImageBlockParam[] 
 		: []
 }
 
+/** 指导 Cline 工具调用的 Reminder */
 const toolUseInstructionsReminder = `# Reminder: Instructions for Tool Use
 
 Tool uses are formatted using XML-style tags. The tool name is enclosed in opening and closing tags, and each parameter is similarly enclosed within its own set of tags. Here's the structure:

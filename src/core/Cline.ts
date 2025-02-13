@@ -63,11 +63,18 @@ import { ClineProvider, GlobalFileNames } from "./webview/ClineProvider"
 const cwd = vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath).at(0) ?? path.join(os.homedir(), "Desktop") // may or may not exist but fs checking existence would immediately ask for permission which would be bad UX, need to come up with a better solution
 
 type ToolResponse = string | Array<Anthropic.TextBlockParam | Anthropic.ImageBlockParam>
+/** Cline 以 Anthropic 标准定义的用户上下文，包括：文本、图片、工具调用、工具调用结果 */
 type UserContent = Array<
 	Anthropic.TextBlockParam | Anthropic.ImageBlockParam | Anthropic.ToolUseBlockParam | Anthropic.ToolResultBlockParam
 >
 
+/**
+ * Cline 类是 ClineProvider 的核心类。一个 Cline 实例只负责处理一个任务。
+ * 
+ * 对于用户的一个新任务或者历史任务，在 ClineProvider 中创建一个 Cline 实例处理
+ */
 export class Cline {
+	/** 当前 Cline 实例要处理的任务 ID，是 Date 字符串 */
 	readonly taskId: string
 	api: ApiHandler
 	private terminalManager: TerminalManager
@@ -87,6 +94,7 @@ export class Cline {
 	private askResponseImages?: string[]
 	private lastMessageTs?: number
 	private consecutiveAutoApprovedRequestsCount: number = 0
+	/** 连续发生的错误计数器 */
 	private consecutiveMistakeCount: number = 0
 	private providerRef: WeakRef<ClineProvider>
 	private abort: boolean = false
@@ -552,6 +560,14 @@ export class Cline {
 
 	// partial has three valid states true (partial message), false (completion of partial message), undefined (individual complete message)
 	/**
+	 * 【主线】
+	 * Cline ask 用于向用户询问，在前端一般表现为 Cline wants to do sth (edit this file, execute this command, etc.)
+	 * 在向用户询问后，使用 pWaitFor 库等待用户答复
+	 * 
+	 * Cline askResponse 是用户在前端对 Cline ask 的回应：“接受”按钮、“拒绝”按钮、还是文本框输入答复。
+	 * 无论是哪一种，都是通过 `vscode.postMessage()` 给后端传递 "askResponse" 类型消息，再由 ClineProvider 定义的 onDidReceiveMessage 处理，设置 Cline 实例的 askResponse 3 个属性。
+	 * 
+	 * 
 	 * partial 变量有三个有效的状态：
 	 *    - true：表示当前是一个部分消息，也就是说，这条消息还没有完整接收或处理，只有部分内容。
 	 *    - false：表示这条消息已经完成，即消息的内容已经完整地接收或处理完毕。
@@ -829,6 +845,15 @@ export class Cline {
 		)
 	}
 
+	/**
+	 * 【主线】基于 Cline 实例构造时的 historyItem 属性，继续完成一个旧任务【恢复一个历史任务】
+	 * 1. 读取 uiMessages 文件中记录的 Cline Message 数组；
+	 * 2. 寻找可能存在的上一个 “恢复历史任务” 的消息（ask 属性为 resume_task 或 resume_completed_task）
+	 *    删除该消息之后的所有消息；【放弃上一次恢复】
+	 * 3. 删除没有任何“部分内容”流式传输的 api_req_started
+	 * 4. 用修改后的 ClineMessage 数组覆盖保存
+	 * 【之后是同步 API 对话历史，这里暂时略过】
+	 */
 	private async resumeTaskFromHistory() {
 		// TODO: right now we let users init checkpoints for old tasks, assuming they're continuing them from the same workspace (which we never tied to tasks, so no way for us to know if it's opened in the right workspace)
 		// const doesShadowGitExist = await CheckpointTracker.doesShadowGitExist(this.taskId, this.providerRef.deref())
@@ -865,23 +890,16 @@ export class Cline {
 
 		// Now present the cline messages to the user and ask if they want to resume (NOTE: we ran into a bug before where the apiconversationhistory wouldnt be initialized when opening a old task, and it was because we were waiting for resume)
 		// This is important in case the user deletes messages without resuming the task first
+		// NOTE: 现在向用户呈现cline消息并询问他们是否想要恢复（注意：我们之前遇到了一个错误，当打开旧任务时，apiconversationhistory 不会初始化，这是因为我们正在等待resume）在用户删除消息而不首先恢复任务的情况下，这一点很重要
 		this.apiConversationHistory = await this.getSavedApiConversationHistory()
 
+		// 从 ClineMessage 数组中找到最后一个非 “恢复历史任务” 的消息（因为之前可能进行过多次“恢复任务”）
 		const lastClineMessage = this.clineMessages
 			.slice()
 			.reverse()
 			.find((m) => !(m.ask === "resume_task" || m.ask === "resume_completed_task")) // could be multiple resume tasks
-		// const lastClineMessage = this.clineMessages[lastClineMessageIndex]
-		// could be a completion result with a command
-		// const secondLastClineMessage = this.clineMessages
-		// 	.slice()
-		// 	.reverse()
-		// 	.find(
-		// 		(m, index) =>
-		// 			index !== lastClineMessageIndex && !(m.ask === "resume_task" || m.ask === "resume_completed_task")
-		// 	)
-		// (lastClineMessage?.ask === "command" && secondLastClineMessage?.ask === "completion_result")
 
+		// 判断该消息的 ask 属性，以确定要恢复的任务 是否已经完成
 		let askType: ClineAsk
 		if (lastClineMessage?.ask === "completion_result") {
 			askType = "resume_completed_task"
@@ -891,6 +909,12 @@ export class Cline {
 
 		this.isInitialized = true
 
+		/**
+		 * Cline 向用户询问是否恢复任务。
+		 * 根据 `webview-ui\src\components\chat\ChatView.tsx` 中的逻辑（特别是 useDeepCompareEffect）：
+		 * askType = "resume_task"，前端按钮显示为 "Resume Task"
+		 * askType = "resume_completed_task"，前端按钮显示为 "Start New Task"【意思就是说完整的任务不让继续编辑了？】
+		 */
 		const { response, text, images } = await this.ask(askType) // calls poststatetowebview
 		let responseText: string | undefined
 		let responseImages: string[] | undefined
@@ -905,6 +929,8 @@ export class Cline {
 		let existingApiConversationHistory: Anthropic.Messages.MessageParam[] = await this.getSavedApiConversationHistory()
 
 		// v2.0 xml tags refactor caveat: since we don't use tools anymore, we need to replace all tool use blocks with a text block since the API disallows conversations with tool uses and no tool schema
+		// NOTE: v2.0 XML 标签重构注意事项：由于我们不再使用工具，因此需要将所有工具使用块替换为文本块，因为 API 不允许包含工具使用的对话，且没有工具模式。
+		// FIXME: 这里不详细解读如何进行 工具使用块 的替换
 		const conversationWithoutToolBlocks = existingApiConversationHistory.map((message) => {
 			if (Array.isArray(message.content)) {
 				const newContent = message.content.map((block) => {
@@ -948,6 +974,7 @@ export class Cline {
 		let modifiedOldUserContent: UserContent // either the last message if its user message, or the user message before the last (assistant) message
 		let modifiedApiConversationHistory: Anthropic.Messages.MessageParam[] // need to remove the last user message to replace with new modified user message
 		if (existingApiConversationHistory.length > 0) {
+			// 为什么不用 const lastMessage = existingApiConversationHistory.at(-1)
 			const lastMessage = existingApiConversationHistory[existingApiConversationHistory.length - 1]
 
 			if (lastMessage.role === "assistant") {
@@ -1076,10 +1103,16 @@ export class Cline {
 		await this.initiateTaskLoop(newUserContent, false)
 	}
 
+	/**
+	 * 【主线】初始化任务循环，对 userContent 进行递归处理
+	 * @param userContent Cline 以 Anthropic 标准定义的用户上下文，包括：文本、图片、工具调用、工具调用结果
+	 * @param isNewTask 是否是新任务
+	 */
 	private async initiateTaskLoop(userContent: UserContent, isNewTask: boolean): Promise<void> {
 		let nextUserContent = userContent
 		let includeFileDetails = true
 		while (!this.abort) {
+			// NOTE: 只在最开始的时候需要用 tree-sitter 解析文件详情，之后不再需要
 			const didEndLoop = await this.recursivelyMakeClineRequests(nextUserContent, includeFileDetails, isNewTask)
 			includeFileDetails = false // we only need file details the first time
 
@@ -1087,6 +1120,7 @@ export class Cline {
 			// There is a MAX_REQUESTS_PER_TASK limit to prevent infinite requests, but Cline is prompted to finish the task as efficiently as he can.
 
 			//const totalCost = this.calculateApiCost(totalInputTokens, totalOutputTokens)
+			// NOTE: 目前 Cline 的 task 永远不会“完成”。didEndLoop 只有当用户达到最大请求并拒绝重置计数时才会发生。
 			if (didEndLoop) {
 				// For now a task never 'completes'. This will only happen if the user hits max requests and denies resetting the count.
 				//this.say("task_completed", `Task completed. Total API usage cost: ${totalCost}`)
@@ -2983,6 +3017,7 @@ export class Cline {
 			throw new Error("Cline instance aborted")
 		}
 
+		/** 处理 Cline 连续发生错误的情况（指思考失败？答复失败？没有采用工具调用？） */
 		if (this.consecutiveMistakeCount >= 3) {
 			if (this.autoApprovalSettings.enabled && this.autoApprovalSettings.enableNotifications) {
 				showSystemNotification({
@@ -3010,6 +3045,7 @@ export class Cline {
 			this.consecutiveMistakeCount = 0
 		}
 
+		/** 处理 Cline 在获得用户自动授权时，依然连续发生错误的情况（指思考失败？答复失败？没有采用工具调用？） */
 		if (
 			this.autoApprovalSettings.enabled &&
 			this.consecutiveAutoApprovedRequestsCount >= this.autoApprovalSettings.maxRequests
