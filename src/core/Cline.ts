@@ -182,11 +182,12 @@ export class Cline {
 		return taskDir
 	}
 
-	// #region LLM API 对话历史 [context.globalStorageUri.fsPath]/tasks/api_conversation_history.json
+	// #region 当前任务的 LLM API 对话历史。
 	// FIXME 这里的 API 对话历史均为 Anthropic.MessageParam[] ，其他 LLM API 是否需要转化？
 	// 只提供了Gemini O1 openai 格式同 anthropic.message 相互转换的方法 但是在实际代码中并未调用这几个方法
 	// 提供的 ConvertToO1Messages 和 ConvertToOpenAiMessages 转换方法比较常用
 
+	/** 从 api_conversation_history.json 读取当前任务的 LLM API 对话历史数组 */
 	private async getSavedApiConversationHistory(): Promise<Anthropic.MessageParam[]> {
 		const filePath = path.join(await this.ensureTaskDirectoryExists(), GlobalFileNames.apiConversationHistory)
 		const fileExists = await fileExistsAtPath(filePath)
@@ -196,16 +197,19 @@ export class Cline {
 		return []
 	}
 
+	/** 将一条消息存入 API 对话历史数组，并保存到 api_conversation_history.json 文件 */
 	private async addToApiConversationHistory(message: Anthropic.MessageParam) {
 		this.apiConversationHistory.push(message)
 		await this.saveApiConversationHistory()
 	}
 
+	/** 重写当前任务的 API 对话历史数组 */
 	private async overwriteApiConversationHistory(newHistory: Anthropic.MessageParam[]) {
 		this.apiConversationHistory = newHistory
 		await this.saveApiConversationHistory()
 	}
 
+	/** 保存当前任务的 API 对话历史到 api_conversation_history.json 文件 */
 	private async saveApiConversationHistory() {
 		try {
 			const filePath = path.join(await this.ensureTaskDirectoryExists(), GlobalFileNames.apiConversationHistory)
