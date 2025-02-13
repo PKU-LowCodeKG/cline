@@ -69,9 +69,11 @@ type UserContent = Array<
 >
 
 /**
- * Cline 类是 ClineProvider 的核心类。一个 Cline 实例只负责处理一个任务。
+ * Cline 类是 ClineProvider 的核心类。
  * 
- * 对于用户的一个新任务或者历史任务，在 ClineProvider 中创建一个 Cline 实例处理
+ * 对于用户的一个新任务或者历史任务，在 ClineProvider 中创建一个 Cline 实例处理，一个 Cline 实例只负责处理一个任务，由 taskId 标识。
+ * 
+ * Cline 实例的生命周期是：开始新任务/恢复并继续旧任务（创建 Cline 实例）-> 中断废弃当前任务（废弃 Cline 实例）
  */
 export class Cline {
 	/** 当前 Cline 实例要处理的任务 ID，是 Date 字符串 */
@@ -1111,6 +1113,15 @@ export class Cline {
 
 	/**
 	 * 【主线】初始化任务循环，对 userContent 进行递归处理
+	 * 
+	 * 任务的完成和 "attempt_completion" 工具的调用相关：
+	 * 1. 任务分配与工具调用：Cline 接受任务，并通过调用不同的工具来完成该任务。如果任务没有被标记为已完成（即没有调用 attempt_completion 工具），系统会继续将工具的响应反馈给 Cline，直到他调用 attempt_completion 或不再使用工具。
+	 * 2. 任务完成检查：如果 Cline 在一段时间内没有再调用工具，系统会提示他检查任务是否完成，并建议他调用 attempt_completion 来结束任务。如果他继续使用工具，系统会继续执行任务。
+	 * 3. 最大请求限制：为了防止无限循环的请求，系统对每个任务有 MAX_REQUESTS_PER_TASK 的限制。如果 Cline 的请求达到上限，系统会强制他完成任务。
+	 * 
+	 * 当执行 `abortTask()` 时，this.abort 被设置为 true
+	 * 1. `recursivelyMakeClineRequests()` 会打破递归，返回 true。终止 while 循环。
+	 * 2. while 循环也会因为 this.abort 被设置为 true 而结束。
 	 * @param userContent Cline 以 Anthropic 标准定义的用户上下文，包括：文本、图片、工具调用、工具调用结果
 	 * @param isNewTask 是否是新任务
 	 */
@@ -1147,6 +1158,17 @@ export class Cline {
 		}
 	}
 
+	/**
+	 * 【主线】中断（废弃） Cline 实例绑定的当前任务。
+	 * 
+	 * 该函数是唯一修改 this.abort 的地方。因此 说是“中断”，实际上是彻底废弃了当前任务。
+	 * 此外，所有 `abortTask()` 的地方，紧跟着 `this.cline = undefined`，即 Cline 实例被废弃。
+	 * 因此，Cline 实例会在 废弃其绑定的任务后 被垃圾回收。
+	 * 
+	 * 1. 将 abort 标志设置为 true，以停止任何自主运行的 Promise。
+	 * 2. 调用工具类， 释放所有终端资源、关闭浏览器、关闭浏览器会话、释放忽略控制器资源。
+	 * 3. 最后等待 diffViewProvider 的 revertChanges 方法完成，确保目录和文件在重新启动任务之前已恢复到检查点状态。
+	 */
 	async abortTask() {
 		this.abort = true // will stop any autonomously running promises
 		this.terminalManager.disposeAll()
@@ -1155,6 +1177,7 @@ export class Cline {
 		this.clineIgnoreController.dispose()
 		await this.diffViewProvider.revertChanges() // need to await for when we want to make sure directories/files are reverted before re-starting the task from a checkpoint
 	}
+	// #endregion
 
 	// Checkpoints
 
