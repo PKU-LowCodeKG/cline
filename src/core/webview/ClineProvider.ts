@@ -2134,6 +2134,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			await this.storeSecret(key, undefined)
 		}
 		if (this.cline) {
+			// 【吐槽】为什么不直接用 clearTask() 方法？
 			this.cline.abortTask()
 			this.cline = undefined
 		}

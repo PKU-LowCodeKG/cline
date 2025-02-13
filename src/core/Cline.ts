@@ -84,6 +84,7 @@ export class Cline {
 	browserSession: BrowserSession
 	/** 当前 Cline 实例的任务是否已经编辑过文件 */
 	private didEditFile: boolean = false
+	/** Cline 的自定义指令，只在构造函数中读入 */
 	customInstructions?: string
 	autoApprovalSettings: AutoApprovalSettings
 	private browserSettings: BrowserSettings
@@ -1013,7 +1014,7 @@ export class Cline {
 		let modifiedOldUserContent: UserContent // either the last message if its user message, or the user message before the last (assistant) message
 		let modifiedApiConversationHistory: Anthropic.Messages.MessageParam[] // need to remove the last user message to replace with new modified user message
 		if (existingApiConversationHistory.length > 0) {
-			// 为什么不用 const lastMessage = existingApiConversationHistory.at(-1)
+			// 【吐槽】为什么不用 const lastMessage = existingApiConversationHistory.at(-1)
 			const lastMessage = existingApiConversationHistory[existingApiConversationHistory.length - 1]
 
 			if (lastMessage.role === "assistant") {
@@ -1401,8 +1402,22 @@ export class Cline {
 		return statusCode && !message.includes(statusCode.toString()) ? `${statusCode} - ${message}` : message
 	}
 
+	/**
+	 * 【主线】该函数是一个异步生成器函数，非常适合处理需要逐步获取的 API 数据流
+	 * 【核心交互函数】
+	 * 1. 读取工具支持配置（MCP、Claude Computer Use）
+	 * 2. 结合 cwd、模型对工具支持情况、MCP Hub 和浏览器设置等信息 生成 `SYSTEM PROMPT`
+	 * 3. 获取用户自定义指令（Custom Instructions）、.clinerules 文件中的指令、.clineignore 文件中的内容，生成相应的 `User Instructions` 提示
+	 * 4. 如果之前的 API 请求的 token 使用量接近上下文窗口的最大值，则截断对话历史记录
+	 * 5. `SYSTEM PROMPT` + `User Instructions` + 截断后对话历史记录，提供给模型
+	 * 6. 获取返回的流并创建异步迭代器。处理 API 请求和重试
+	 * 以 chunk 形式 流式返回 LLM 的回复结果
+	 * @param previousApiReqIndex 
+	 * @returns 
+	 */
 	async *attemptApiRequest(previousApiReqIndex: number): ApiStream {
 		// Wait for MCP servers to be connected before generating system prompt
+		// 1. 使用 pWaitFor 等待直到 MCP 服务器连接完成（最多 10 秒）
 		await pWaitFor(() => this.providerRef.deref()?.mcpHub?.isConnecting !== true, { timeout: 10_000 }).catch(() => {
 			console.error("MCP servers failed to connect in time")
 		})
@@ -1412,13 +1427,17 @@ export class Cline {
 			throw new Error("MCP hub not available")
 		}
 
+		// 2. 读取 cline 配置：是否禁用浏览器工具、是否支持 Computer Use 功能（Claude Computer Use API，操作电脑工具）
+		// https://docs.anthropic.com/en/docs/build-with-claude/computer-use
 		const disableBrowserTool = vscode.workspace.getConfiguration("cline").get<boolean>("disableBrowserTool") ?? false
 		const modelSupportsComputerUse = this.api.getModel().info.supportsComputerUse ?? false
 
 		const supportsComputerUse = modelSupportsComputerUse && !disableBrowserTool // only enable computer use if the model supports it and the user hasn't disabled it
 
+		// 3. 使用 SYSTEM_PROMPT 函数生成一个系统提示，这个提示包含了 cwd、模型对工具支持情况、MCP Hub 和浏览器设置等信息。
 		let systemPrompt = await SYSTEM_PROMPT(cwd, supportsComputerUse, mcpHub, this.browserSettings)
 
+		// 4. 获取用户自定义指令（Custom Instructions）、.clinerules 文件中的指令、.clineignore 文件中的内容，生成相应的 User Instructions 提示
 		let settingsCustomInstructions = this.customInstructions?.trim()
 		const clineRulesFilePath = path.resolve(cwd, GlobalFileNames.clineRules)
 		let clineRulesFileInstructions: string | undefined
@@ -1446,7 +1465,9 @@ export class Cline {
 
 		// If the previous API request's total token usage is close to the context window, truncate the conversation history to free up space for the new request
 		// 如果token使用量接近上下文窗口大小，则截断对话历史以释放空间
+		// 5. 如果之前的 API 请求的 token 使用量接近上下文窗口的最大值，则截断对话历史记录，以便为新请求腾出空间。
 		if (previousApiReqIndex >= 0) {
+			// 5-1. 如果 previousApiReqIndex 大于或等于 0，则获取上一个请求的信息。通过解析 clineMessages 中的历史记录，计算出 tokensIn、tokensOut、cacheWrites 和 cacheReads 的总和。
 			const previousRequest = this.clineMessages[previousApiReqIndex]
 			if (previousRequest && previousRequest.text) {
 				const { tokensIn, tokensOut, cacheWrites, cacheReads }: ClineApiReqInfo = JSON.parse(previousRequest.text)
@@ -1456,6 +1477,7 @@ export class Cline {
 				if (this.api instanceof OpenAiHandler && this.api.getModel().id.toLowerCase().includes("deepseek")) {
 					contextWindow = 64_000
 				}
+				// 5-2. 根据不同的模型（如 DeepSeek、Claude）的 contextWindow，计算出最大允许的 token 数量。
 				let maxAllowedSize: number
 				// 针对不同模型设置窗口大小
 				switch (contextWindow) {
@@ -1473,6 +1495,7 @@ export class Cline {
 				}
 
 				// This is the most reliable way to know when we're close to hitting the context window.
+				// 5-3 如果当前 token 数量超过了上下文窗口的最大值，则选择保留对话的一部分（例如保留四分之一或二分之一），并更新 `conversationHistoryDeletedRange` 来保存已删除的历史记录。
 				if (totalTokens >= maxAllowedSize) {
 					// Since the user may switch between models with different context windows, truncating half may not be enough (ie if switching from claude 200k to deepseek 64k, half truncation will only remove 100k tokens, but we need to remove much more)
 					// So if totalTokens/2 is greater than maxAllowedSize, we truncate 3/4 instead of 1/2
@@ -1500,10 +1523,12 @@ export class Cline {
 			this.conversationHistoryDeletedRange,
 		)
 
+		// 6. 使用 createMessage 方法生成 API 请求，传入生成的 systemPrompt 和经过截断的对话历史。获取返回的流并创建异步迭代器。
 		let stream = this.api.createMessage(systemPrompt, truncatedConversationHistory)
 
 		const iterator = stream[Symbol.asyncIterator]()
 
+		// 7. 处理 API 请求失败与重试
 		try {
 			// awaiting first chunk to see if it will throw an error
 			this.isWaitingForFirstChunk = true
@@ -1529,6 +1554,8 @@ export class Cline {
 				await this.say("api_req_retried")
 			}
 			// delegate generator output from the recursive call
+			// NOTE: 如果请求失败，递归调用并传递 委托递归调用的生成器结果
+			// yield* 是一个特殊的语法，用于将另一个生成器的所有输出传递到当前生成器中。
 			yield* this.attemptApiRequest(previousApiReqIndex)
 			return
 		}
@@ -3089,6 +3116,13 @@ export class Cline {
 		}
 	}
 
+	/**
+	 * 【主线】递归地发出 Cline 请求
+	 * 
+	 * includeFileDetails 是否包括当前工作目录下的文件列表。
+	 * 只在最开始的时候（while 的第一次循环，本函数的第一层递归）为 true
+	 * @returns 是否继续循环的 bool，用于终止父循环
+	 */
 	async recursivelyMakeClineRequests(
 		userContent: UserContent,
 		includeFileDetails: boolean = false,
@@ -3126,7 +3160,7 @@ export class Cline {
 			this.consecutiveMistakeCount = 0
 		}
 
-		/** 处理 Cline 在获得用户自动授权时，依然连续发生错误的情况（指思考失败？答复失败？没有采用工具调用？） */
+		/** 处理 Cline 在获得用户自动授权审批时，依然连续发生错误的情况（指思考失败？答复失败？没有采用工具调用？） */
 		if (
 			this.autoApprovalSettings.enabled &&
 			this.consecutiveAutoApprovedRequestsCount >= this.autoApprovalSettings.maxRequests
@@ -3146,6 +3180,7 @@ export class Cline {
 		}
 
 		// get previous api req's index to check token usage and determine if we need to truncate conversation history
+		/** 获取上一个 api_req_started 在 ClineMessage 数组中的索引，以检查 token 使用情况并确定是否需要截断对话历史记录 */ 
 		const previousApiReqIndex = findLastIndex(this.clineMessages, (m) => m.say === "api_req_started")
 
 		// Save checkpoint if this is the first API request
@@ -3283,6 +3318,7 @@ export class Cline {
 			this.didAutomaticallyRetryFailedApiRequest = false
 			await this.diffViewProvider.reset()
 
+			// NOTE: 处理 LLM 的流式结果
 			const stream = this.attemptApiRequest(previousApiReqIndex) // yields only if the first chunk is successful, otherwise will allow the user to retry the request (most likely due to rate limit error, which gets thrown on the first chunk)
 			let assistantMessage = ""
 			let reasoningMessage = ""
@@ -3348,6 +3384,7 @@ export class Cline {
 					}
 				}
 			} catch (error) {
+				// NOTE: abandoned 和 abort 的区别是，abandoned 是当扩展不再等待 cline 实例完成中止时发生的（当循环中的任何函数由于 this.abort 而抛出错误时，此处会抛出错误）
 				// abandoned happens when extension is no longer waiting for the cline instance to finish aborting (error is thrown here when any function in the for loop throws due to this.abort)
 				if (!this.abandoned) {
 					this.abortTask() // if the stream failed, there's various states the task could be in (i.e. could have streamed some tools the user may have executed), so we just resort to replicating a cancel task
