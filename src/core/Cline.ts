@@ -1405,6 +1405,7 @@ export class Cline {
 		}
 
 		// If the previous API request's total token usage is close to the context window, truncate the conversation history to free up space for the new request
+		// 如果token使用量接近上下文窗口大小，则截断对话历史以释放空间
 		if (previousApiReqIndex >= 0) {
 			const previousRequest = this.clineMessages[previousApiReqIndex]
 			if (previousRequest && previousRequest.text) {
@@ -1416,6 +1417,7 @@ export class Cline {
 					contextWindow = 64_000
 				}
 				let maxAllowedSize: number
+				// 针对不同模型设置窗口大小
 				switch (contextWindow) {
 					case 64_000: // deepseek models
 						maxAllowedSize = contextWindow - 27_000
@@ -1435,9 +1437,11 @@ export class Cline {
 					// Since the user may switch between models with different context windows, truncating half may not be enough (ie if switching from claude 200k to deepseek 64k, half truncation will only remove 100k tokens, but we need to remove much more)
 					// So if totalTokens/2 is greater than maxAllowedSize, we truncate 3/4 instead of 1/2
 					// FIXME: truncating the conversation in a way that is optimal for prompt caching AND takes into account multi-context window complexity is something we need to improve
+					// 计算保留值
 					const keep = totalTokens / 2 > maxAllowedSize ? "quarter" : "half"
 
 					// NOTE: it's okay that we overwriteConversationHistory in resume task since we're only ever removing the last user message and not anything in the middle which would affect this range
+					// 调用 getNextTruncationRange 方法 计算出需要截断的信息范围
 					this.conversationHistoryDeletedRange = getNextTruncationRange(
 						this.apiConversationHistory,
 						this.conversationHistoryDeletedRange,
@@ -1450,6 +1454,7 @@ export class Cline {
 		}
 
 		// conversationHistoryDeletedRange is updated only when we're close to hitting the context window, so we don't continuously break the prompt cache
+		// 根据计算出的截断范围，重新构造需要保留的信息
 		const truncatedConversationHistory = getTruncatedMessages(
 			this.apiConversationHistory,
 			this.conversationHistoryDeletedRange,
