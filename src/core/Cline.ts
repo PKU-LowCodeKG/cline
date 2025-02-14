@@ -116,6 +116,7 @@ export class Cline {
 	isWaitingForFirstChunk = false
 	isStreaming = false
 	private currentStreamingContentIndex = 0
+	/** Cline 的 Assistant Message 数组，TextContent | ToolUse  */
 	private assistantMessageContent: AssistantMessageContent[] = []
 	private presentAssistantMessageLocked = false
 	private presentAssistantMessageHasPendingUpdates = false
@@ -1364,12 +1365,13 @@ export class Cline {
 
 	/**
 	 * 【主线】该函数是一个异步生成器函数，非常适合处理需要逐步获取的 API 数据流
-	 * 【核心交互函数】
+	 * 
+	 * 【核心交互函数】以 ApiStreamChunk 形式（"text"、"reasoning"、"usage" 三种类型）流式返回 LLM 的回复结果
 	 * 1. 读取工具支持配置（MCP、Claude Computer Use）
 	 * 2. 结合 cwd、模型对工具支持情况、MCP Hub 和浏览器设置等信息 生成 `SYSTEM PROMPT`
 	 * 3. 获取用户自定义指令（Custom Instructions）、.clinerules 文件中的指令、.clineignore 文件中的内容，生成相应的 `User Instructions` 提示
-	 * 4. 如果之前的 API 请求的 token 使用量接近上下文窗口的最大值，则截断对话历史记录
-	 * 5. `SYSTEM PROMPT` + `User Instructions` + 截断后对话历史记录，提供给模型
+	 * 4. 如果之前的 API 请求的 token 使用量接近上下文窗口的最大值，则截断 LLM API 对话历史记录
+	 * 5. `SYSTEM PROMPT` + `User Instructions` + 截断后的 LLM API 对话历史记录，提供给模型
 	 * 6. 获取返回的流并创建异步迭代器。处理 API 请求和重试
 	 * 以 chunk 形式 流式返回 LLM 的回复结果
 	 * @param previousApiReqIndex 
@@ -1478,7 +1480,7 @@ export class Cline {
 			this.conversationHistoryDeletedRange,
 		)
 
-		// 6. 使用 createMessage 方法生成 API 请求，传入生成的 systemPrompt 和经过截断的对话历史。获取返回的流并创建异步迭代器。
+		// 6. 使用 createMessage 方法生成 API 请求，传入生成的 systemPrompt 和经过截断的 LLM API 对话历史。获取返回的流并创建异步迭代器。
 		let stream = this.api.createMessage(systemPrompt, truncatedConversationHistory)
 
 		const iterator = stream[Symbol.asyncIterator]()
@@ -3261,6 +3263,7 @@ export class Cline {
 
 			// reset streaming state
 			this.currentStreamingContentIndex = 0
+			// NOTE: Assistant Message 数组在流程中，第一次初始化
 			this.assistantMessageContent = []
 			this.didCompleteReadingStream = false
 			this.userMessageContent = []
@@ -3272,12 +3275,14 @@ export class Cline {
 			this.didAutomaticallyRetryFailedApiRequest = false
 			await this.diffViewProvider.reset()
 
-			// NOTE: 处理 LLM 的流式结果
+			// #region 处理 LLM response 的流式结果
 			const stream = this.attemptApiRequest(previousApiReqIndex) // yields only if the first chunk is successful, otherwise will allow the user to retry the request (most likely due to rate limit error, which gets thrown on the first chunk)
+			// assistantMessage 在递归中第一次初始化
 			let assistantMessage = ""
 			let reasoningMessage = ""
 			this.isStreaming = true
 			try {
+				// NOTE: ApiStreamChunk 形式（"text"、"reasoning"、"usage" 三种类型）
 				for await (const chunk of stream) {
 					if (!chunk) {
 						// Sometimes chunk is undefined, no idea that can cause it, but this workaround seems to fix it
@@ -3293,10 +3298,12 @@ export class Cline {
 							break
 						case "reasoning":
 							// reasoning will always come before assistant message
+							// NOTE: "reasoning" 信息永远在 "text" 消息之前，所以不需要检查
 							reasoningMessage += chunk.reasoning
 							await this.say("reasoning", reasoningMessage, undefined, true)
 							break
 						case "text":
+							// NOTE: 检查是否存在正在拼接的 "reasoning" 信息，如果存在，此时 chunk 的类型是 "text"，说明此时 "reasoning" 信息已经拼接完成
 							if (reasoningMessage && assistantMessage.length === 0) {
 								// complete reasoning message
 								await this.say("reasoning", reasoningMessage, undefined, false)
@@ -3304,7 +3311,10 @@ export class Cline {
 							assistantMessage += chunk.text
 							// parse raw assistant message into content blocks
 							const prevLength = this.assistantMessageContent.length
+							// NOTE: 从 chunk.text 中解析出 Assistant Message 的内容
 							this.assistantMessageContent = parseAssistantMessage(assistantMessage)
+							// NOTE: 如果是第一次解析（因为此前 Assistant Message 数组 为空，其长度肯定比解析后的少），或者之后解析的消息长度比之前的多
+							// FIXME: 暂时不知道为什么要 设置 userMessageContentReady
 							if (this.assistantMessageContent.length > prevLength) {
 								this.userMessageContentReady = false // new content we need to present, reset to false in case previous content set this to true
 							}
@@ -3361,6 +3371,7 @@ export class Cline {
 			}
 
 			this.didCompleteReadingStream = true
+			// #endregion
 
 			// set any blocks to be complete to allow presentAssistantMessage to finish and set userMessageContentReady to true
 			// (could be a text block that had no subsequent tool uses, or a text block at the very end, or an invalid tool use, etc. whatever the case, presentAssistantMessage relies on these blocks either to be completed or the user to reject a block in order to proceed and eventually set userMessageContentReady to true)

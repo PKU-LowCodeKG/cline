@@ -1,5 +1,10 @@
 import { AssistantMessageContent, TextContent, ToolUse, ToolParamName, toolParamNames, toolUseNames, ToolUseName } from "."
 
+/**
+ * 从待解析的 文本 中解析出 AssistantMessageContent 数组
+ * @param assistantMessage 带解析的助手消息
+ * @returns AssistantMessageContent[]
+ */
 export function parseAssistantMessage(assistantMessage: string) {
 	let contentBlocks: AssistantMessageContent[] = []
 	let currentTextContent: TextContent | undefined = undefined
@@ -15,6 +20,8 @@ export function parseAssistantMessage(assistantMessage: string) {
 		accumulator += char
 
 		// there should not be a param without a tool use
+		// NOTE: 如果当前存在正在解析的 tool_use 类型的消息，并且存在正在解析的参数
+		// - 如果当前子串 accumulator 以一个 参数的结束标签</param> 结尾，则结束解析当前的参数
 		if (currentToolUse && currentParamName) {
 			const currentParamValue = accumulator.slice(currentParamValueStartIndex)
 			const paramClosingTag = `</${currentParamName}>`
@@ -30,7 +37,11 @@ export function parseAssistantMessage(assistantMessage: string) {
 		}
 
 		// no currentParamName
-
+		// NOTE: 如果当前存在正在解析的 tool_use 类型的消息
+		// - 如果当前子串 accumulator 以一个 工具调用的结束标签</tool_use> 结尾，则结束解析当前的工具调用；
+		//     标记当前的 tool_use 类型的消息是完整的
+		// - 如果当前子串 accumulator 以一个 参数的开始标签<param> 结尾，则开始解析一个新的参数；
+		//     特殊处理 write_to_file 工具调用的 content 参数，因为它可能包含多个开始-结束标签对，所以需要选择最后一个结束标签
 		if (currentToolUse) {
 			const currentToolValue = accumulator.slice(currentToolUseStartIndex)
 			const toolUseClosingTag = `</${currentToolUse.name}>`
@@ -72,7 +83,8 @@ export function parseAssistantMessage(assistantMessage: string) {
 		}
 
 		// no currentToolUse
-
+		// NOTE: 如果当前子串 accumulator 以一个 工具调用的开始标签<tool_use> 结尾，则开始解析一个新的工具调用，同时它是不完整的
+		// - text 类型的消息内容是否结束，取决于是否开始了一个新的工具调用
 		let didStartToolUse = false
 		const possibleToolUseOpeningTags = toolUseNames.map((name) => `<${name}>`)
 		for (const toolUseOpeningTag of possibleToolUseOpeningTags) {
@@ -84,8 +96,11 @@ export function parseAssistantMessage(assistantMessage: string) {
 					params: {},
 					partial: true,
 				}
+				// 接下来是工具调用标签 包裹的内容
 				currentToolUseStartIndex = accumulator.length
 				// this also indicates the end of the current text content
+				// 因为开始了一个新的 tool_use 类型，所以 如果当前存在正在解析的 text 类型的消息，其内容就算是结束了
+				// 标记当前的 text 类型的消息是完整的；切除掉 tool_use 标签的开始标签
 				if (currentTextContent) {
 					currentTextContent.partial = false
 					// remove the partially accumulated tool use tag from the end of text (<tool)
@@ -101,6 +116,7 @@ export function parseAssistantMessage(assistantMessage: string) {
 			}
 		}
 
+		// NOTE: 如果当前并没有开始解析一个新的工具调用，则当前的子串就是 text 类型的消息，同时它是不完整的
 		if (!didStartToolUse) {
 			// no tool use, so it must be text either at the beginning or between tools
 			if (currentTextContent === undefined) {
