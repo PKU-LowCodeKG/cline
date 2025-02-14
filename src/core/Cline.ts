@@ -306,6 +306,15 @@ export class Cline {
 	// #endregion
 
 	// #region Checkpoint 的恢复和保存，用于实现 diff 功能
+
+	/**
+	 * 恢复到指定的时间点。
+	 * 
+	 * 该函数根据提供的消息时间戳查找对应的消息，并根据指定的恢复类型执行恢复操作。
+	 * ClineProvider 中 监听到"checkpointRestore" 使用
+	 * @param messageTs - 要恢复到的消息的时间戳。
+	 * @param restoreType - 恢复类型，可以是 "task"（任务）、"workspace"（工作区）或 "taskAndWorkspace"（任务和工作区）。
+	 */
 	async restoreCheckpoint(messageTs: number, restoreType: ClineCheckpointRestore) {
 		const messageIndex = this.clineMessages.findIndex((m) => m.ts === messageTs)
 		const message = this.clineMessages[messageIndex]
@@ -323,6 +332,7 @@ export class Cline {
 			case "workspace":
 				if (!this.checkpointTracker) {
 					try {
+						/** 创建 CheckpointTracker 实例 */
 						this.checkpointTracker = await CheckpointTracker.create(this.taskId, this.providerRef.deref())
 						this.checkpointTrackerErrorMessage = undefined
 					} catch (error) {
@@ -336,6 +346,7 @@ export class Cline {
 				}
 				if (message.lastCheckpointHash && this.checkpointTracker) {
 					try {
+						// 调用 CheckpointTracker 的 resetHead 方法 定位到指定的提交
 						await this.checkpointTracker.resetHead(message.lastCheckpointHash)
 					} catch (error) {
 						const errorMessage = error instanceof Error ? error.message : "Unknown error"
@@ -393,7 +404,9 @@ export class Cline {
 
 			// Set isCheckpointCheckedOut flag on the message
 			// Find all checkpoint messages before this one
+			// 设置 isCheckpointCheckedOut 标志
 			const checkpointMessages = this.clineMessages.filter((m) => m.say === "checkpoint_created")
+			/**找到待查找时间戳的检查点 */
 			const currentMessageIndex = checkpointMessages.findIndex((m) => m.ts === messageTs)
 
 			// Set isCheckpointCheckedOut to false for all checkpoint messages
@@ -410,13 +423,22 @@ export class Cline {
 			await this.providerRef.deref()?.postMessageToWebview({ type: "relinquishControl" })
 		}
 	}
-
+	/**
+	 * 展示多文件差异。
+	 * 该函数根据特定的消息时间戳向用户展示多个文件的差异。
+	 * 可以选择显示自上次任务完成以来的所有更改，或显示自某个快照以来的更改。
+	 * 在ClineProvider中 "checkpointDiff" 调用
+	 *
+	 * @param messageTs - 消息的时间戳，用于标识要查看差异的消息。
+	 * @param seeNewChangesSinceLastTaskCompletion - 布尔值，指示是否显示自上次任务完成以来的新更改。
+	 */
 	async presentMultifileDiff(messageTs: number, seeNewChangesSinceLastTaskCompletion: boolean) {
 		const relinquishButton = () => {
 			this.providerRef.deref()?.postMessageToWebview({ type: "relinquishControl" })
 		}
 
 		console.log("presentMultifileDiff", messageTs)
+		/** 根据时间戳找到对应消息 */
 		const messageIndex = this.clineMessages.findIndex((m) => m.ts === messageTs)
 		const message = this.clineMessages[messageIndex]
 		if (!message) {
@@ -446,7 +468,7 @@ export class Cline {
 				return
 			}
 		}
-
+		/** 包含文件的相对路径 绝对路径 和在不同状态下的内容 */
 		let changedFiles:
 			| {
 					relativePath: string
@@ -459,6 +481,7 @@ export class Cline {
 		try {
 			if (seeNewChangesSinceLastTaskCompletion) {
 				// Get last task completed
+				// 展上次任务完成时的哈希到当前哈希之间的差异
 				const lastTaskCompletedMessage = findLast(
 					this.clineMessages.slice(0, messageIndex),
 					(m) => m.say === "completion_result",
@@ -522,7 +545,11 @@ export class Cline {
 		)
 		relinquishButton()
 	}
-
+	/**
+	 * 异步检查最新的任务完成是否包含与上次完成相比的新更改。
+	 * 
+	 * @returns {Promise<boolean>} - 如果有新的更改返回 `true`，否则返回 `false`。
+	 */
 	async doesLatestTaskCompletionHaveNewChanges() {
 		const messageIndex = findLastIndex(this.clineMessages, (m) => m.say === "completion_result")
 		const message = this.clineMessages[messageIndex]
@@ -1189,10 +1216,18 @@ export class Cline {
 	// #endregion
 
 	// Checkpoints
-
+	/**
+	 * 保存检查点的异步方法。
+	 * 
+	 * 此方法会尝试提交一个检查点，并根据不同情况更新聊天消息中的检查点信息。
+	 * 
+	 * @param {boolean} [isAttemptCompletionMessage=false] - 指示是否将当前操作视为尝试完成消息的操作。
+	 *                                                    
+	 */
 	async saveCheckpoint(isAttemptCompletionMessage: boolean = false) {
 		const commitHash = await this.checkpointTracker?.commit() // silently fails for now
 		// Set isCheckpointCheckedOut to false for all checkpoint_created messages
+		//表示这些检查点不再处于检出状态
 		this.clineMessages.forEach((message) => {
 			if (message.say === "checkpoint_created") {
 				message.isCheckpointCheckedOut = false
@@ -1201,14 +1236,19 @@ export class Cline {
 		if (commitHash) {
 			if (!isAttemptCompletionMessage) {
 				// For non-attempt completion we just say checkpoints
+				//对于非尝试完成消息的操作，发送消息
 				await this.say("checkpoint_created", commitHash)
+				/** 最后一个 say 属性为 checkpoint_created 的消息*/
 				const lastCheckpointMessage = findLast(this.clineMessages, (m) => m.say === "checkpoint_created")
 				if (lastCheckpointMessage) {
+					// 赋值： 当前提交的哈希值
 					lastCheckpointMessage.lastCheckpointHash = commitHash
 					await this.saveClineMessages()
 				}
 			} else {
 				// For attempt_completion, find the last completion_result message and set its checkpoint hash. This will be used to present the 'see new changes' button
+				//对于尝试完成的操作 查找最后一个 say 属性为 "completion_result" 或者 ask 属性为 "completion_result" 的聊天消息
+				// 这个消息将用于显示 "查看新更改" 按钮。
 				const lastCompletionResultMessage = findLast(
 					this.clineMessages,
 					(m) => m.say === "completion_result" || m.ask === "completion_result",
@@ -1426,6 +1466,7 @@ export class Cline {
 		}
 
 		// If the previous API request's total token usage is close to the context window, truncate the conversation history to free up space for the new request
+		// 如果token使用量接近上下文窗口大小，则截断对话历史以释放空间
 		// 5. 如果之前的 API 请求的 token 使用量接近上下文窗口的最大值，则截断对话历史记录，以便为新请求腾出空间。
 		if (previousApiReqIndex >= 0) {
 			// 5-1. 如果 previousApiReqIndex 大于或等于 0，则获取上一个请求的信息。通过解析 clineMessages 中的历史记录，计算出 tokensIn、tokensOut、cacheWrites 和 cacheReads 的总和。
@@ -1440,6 +1481,7 @@ export class Cline {
 				}
 				// 5-2. 根据不同的模型（如 DeepSeek、Claude）的 contextWindow，计算出最大允许的 token 数量。
 				let maxAllowedSize: number
+				// 针对不同模型设置窗口大小
 				switch (contextWindow) {
 					case 64_000: // deepseek models
 						maxAllowedSize = contextWindow - 27_000
@@ -1460,9 +1502,11 @@ export class Cline {
 					// Since the user may switch between models with different context windows, truncating half may not be enough (ie if switching from claude 200k to deepseek 64k, half truncation will only remove 100k tokens, but we need to remove much more)
 					// So if totalTokens/2 is greater than maxAllowedSize, we truncate 3/4 instead of 1/2
 					// FIXME: truncating the conversation in a way that is optimal for prompt caching AND takes into account multi-context window complexity is something we need to improve
+					// 计算保留值
 					const keep = totalTokens / 2 > maxAllowedSize ? "quarter" : "half"
 
 					// NOTE: it's okay that we overwriteConversationHistory in resume task since we're only ever removing the last user message and not anything in the middle which would affect this range
+					// 调用 getNextTruncationRange 方法 计算出需要截断的信息范围
 					this.conversationHistoryDeletedRange = getNextTruncationRange(
 						this.apiConversationHistory,
 						this.conversationHistoryDeletedRange,
@@ -1475,6 +1519,7 @@ export class Cline {
 		}
 
 		// conversationHistoryDeletedRange is updated only when we're close to hitting the context window, so we don't continuously break the prompt cache
+		// 根据计算出的截断范围，重新构造需要保留的信息
 		const truncatedConversationHistory = getTruncatedMessages(
 			this.apiConversationHistory,
 			this.conversationHistoryDeletedRange,
@@ -2972,6 +3017,7 @@ export class Cline {
 									if (lastMessage && lastMessage.ask !== "command") {
 										// havent sent a command message yet so first send completion_result then command
 										await this.say("completion_result", result, undefined, false)
+										//  任务完成或尝试完成 创建一个CheckPoint
 										await this.saveCheckpoint(true)
 										await addNewChangesFlagToLastCompletionResultMessage()
 									} else {

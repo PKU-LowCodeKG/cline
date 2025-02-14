@@ -118,7 +118,9 @@ class CheckpointTracker {
 		const gitPath = path.join(globalStoragePath, "tasks", taskId, "checkpoints", ".git")
 		return await fileExistsAtPath(gitPath)
 	}
-
+	/**
+	 * 初始化 Shadow Git 仓库 添加忽略规则、设置 Git 用户信息、添加所有文件并进行初始提交。
+	 */
 	public async initShadowGit(): Promise<string> {
 		const gitPath = await this.getShadowGitPath()
 		if (await fileExistsAtPath(gitPath)) {
@@ -133,7 +135,7 @@ class CheckpointTracker {
 			const checkpointsDir = path.dirname(gitPath)
 			const git = simpleGit(checkpointsDir)
 			await git.init()
-
+			// 设置工作目录为当前工作空间
 			await git.addConfig("core.worktree", this.cwd) // sets the working tree to the current workspace
 
 			// Disable commit signing for shadow repo
@@ -157,6 +159,7 @@ class CheckpointTracker {
 			// Add basic excludes directly in git config, while respecting any .gitignore in the workspace
 			// .git/info/exclude is local to the shadow git repo, so it's not shared with the main repo - and won't conflict with user's .gitignore
 			// TODO: let user customize these
+			// 添加基本忽略规则，同时尊重工作空间中的 .gitignore 文件
 			const excludesPath = path.join(gitPath, "info", "exclude")
 			await fs.mkdir(path.join(gitPath, "info"), { recursive: true })
 			await fs.writeFile(
@@ -279,7 +282,7 @@ class CheckpointTracker {
 			return undefined
 		}
 	}
-
+	/** 提交当前更改到Git仓库，并返回提交哈希值 */
 	public async commit(): Promise<string | undefined> {
 		try {
 			const gitPath = await this.getShadowGitPath()
@@ -296,7 +299,10 @@ class CheckpointTracker {
 			return undefined
 		}
 	}
-
+	/**
+	 * 将 Git 仓库的 HEAD 重置到指定的提交。
+	 * @param commitHash - 目标提交的哈希值，HEAD 将重置到该提交。
+	 */
 	public async resetHead(commitHash: string): Promise<void> {
 		const gitPath = await this.getShadowGitPath()
 		const git = simpleGit(path.dirname(gitPath))
@@ -325,6 +331,13 @@ class CheckpointTracker {
 	 *                  If omitted, we compare to the working directory.
 	 * @returns Array of file changes with before/after content
 	 */
+	/**
+	 * 返回一个描述两个提交之间或一个提交与当前工作目录之间更改文件的数组（包括未提交的更改）。
+	 *
+	 * @param lhsHash - 比较的起始提交（较旧的提交）
+	 * @param rhsHash - 比较的目标提交（较新的提交）。如果省略，则与工作目录进行比较。
+	 * @returns 包含文件更改前后内容的数组
+	 */
 	public async getDiffSet(
 		lhsHash?: string,
 		rhsHash?: string,
@@ -339,7 +352,7 @@ class CheckpointTracker {
 		const gitPath = await this.getShadowGitPath()
 		const git = simpleGit(path.dirname(gitPath))
 
-		// If lhsHash is missing, use the initial commit of the repo
+		// 如果未提供 lhsHash，则使用仓库的初始提交
 		let baseHash = lhsHash
 		if (!baseHash) {
 			const rootCommit = await git.raw(["rev-list", "--max-parents=0", "HEAD"])
@@ -393,7 +406,7 @@ class CheckpointTracker {
 
 		return result
 	}
-
+	/** 将所有文件添加到 Git 仓库 */
 	private async addAllFiles(git: SimpleGit) {
 		await this.renameNestedGitRepos(true)
 		try {
@@ -404,8 +417,13 @@ class CheckpointTracker {
 			await this.renameNestedGitRepos(false)
 		}
 	}
-
-	// Since we use git to track checkpoints, we need to temporarily disable nested git repos to work around git's requirement of using submodules for nested repos.
+	/**
+	 * 重命名嵌套的 Git 仓库目录以启用或禁用。
+	 * 
+	 * 使用 Git 跟踪检查点时，需要临时禁用嵌套的 Git 仓库
+	 * 
+	 * @param disable - 如果为 true，则禁用嵌套的 Git 仓库；如果为 false，则重新启用它们。
+	 */	
 	private async renameNestedGitRepos(disable: boolean) {
 		// Find all .git directories that are not at the root level
 		const gitPaths = await globby("**/.git" + (disable ? "" : GIT_DISABLED_SUFFIX), {
