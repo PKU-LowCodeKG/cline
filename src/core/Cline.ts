@@ -86,6 +86,7 @@ export class Cline {
 	private didEditFile: boolean = false
 	/** Cline 的自定义指令，只在构造函数中读入 */
 	customInstructions?: string
+	/** 用户自动批准 Cline 使用工具的 权限设置（在插件的 Auto-approve 区域，所有工具调用分为 5 种权限） */
 	autoApprovalSettings: AutoApprovalSettings
 	private browserSettings: BrowserSettings
 	private chatSettings: ChatSettings
@@ -123,6 +124,7 @@ export class Cline {
 	private userMessageContent: (Anthropic.TextBlockParam | Anthropic.ImageBlockParam)[] = []
 	private userMessageContentReady = false
 	private didRejectTool = false
+	/** Cline 的一个 Assistant Message 最多只允许一个 工具调用 */
 	private didAlreadyUseTool = false
 	private didCompleteReadingStream = false
 	private didAutomaticallyRetryFailedApiRequest = false
@@ -833,6 +835,13 @@ export class Cline {
 		}
 	}
 
+	/**
+	 * 调用 Cline Say 方法，向用户展示 “工具调用时参数缺失” 的错误消息。
+	 * @param toolName 发生参数缺失的工具名称
+	 * @param paramName 缺失的参数名称
+	 * @param relPath 相对路径
+	 * @returns Cline 的格式化 工具错误 响应
+	 */
 	async sayAndCreateMissingParamError(toolName: ToolUseName, paramName: string, relPath?: string) {
 		await this.say(
 			"error",
@@ -1373,6 +1382,7 @@ export class Cline {
 		}
 	}
 
+	/** 根据 用户自动批准 Cline 使用工具的 权限设置，将工具调用分为 5 种权限，并给出是否允许 */
 	shouldAutoApproveTool(toolName: ToolUseName): boolean {
 		if (this.autoApprovalSettings.enabled) {
 			switch (toolName) {
@@ -1525,7 +1535,7 @@ export class Cline {
 			this.conversationHistoryDeletedRange,
 		)
 
-		// 6. 使用 createMessage 方法生成 API 请求，传入生成的 systemPrompt 和经过截断的 LLM API 对话历史。获取返回的流并创建异步迭代器。
+		// 6. 使用 createMessage 方法生成 API 请求，传入生成的 systemPrompt 和经过截断的 LLM API 对话历史。获取返回的流并创建异步迭代器。【核心交互】
 		let stream = this.api.createMessage(systemPrompt, truncatedConversationHistory)
 
 		const iterator = stream[Symbol.asyncIterator]()
@@ -1591,6 +1601,8 @@ export class Cline {
 			//throw new Error("No more content blocks to stream! This shouldn't happen...") // remove and just return after testing
 		}
 
+		// 【吐槽】这里为什么不加类型注解啊，明明就是 AssistantMessageContent 类型
+		// const block: AssistantMessageContent = cloneDeep(this.assistantMessageContent[this.currentStreamingContentIndex])
 		const block = cloneDeep(this.assistantMessageContent[this.currentStreamingContentIndex]) // need to create copy bc while stream is updating the array, it could be updating the reference block properties too
 		switch (block.type) {
 			case "text": {
@@ -1650,6 +1662,7 @@ export class Cline {
 				break
 			}
 			case "tool_use":
+				/** 将 ToolUseName 和 ToolUseParams 转为工具的描述信息。 */
 				const toolDescription = () => {
 					switch (block.name) {
 						case "execute_command":
@@ -1683,6 +1696,7 @@ export class Cline {
 					}
 				}
 
+				// 如果用户拒绝使用工具，则将“跳过后续的工具内容（跳过一个完整的工具 或者 打断的部分工具）” 的消息添加到 userMessageContent 中
 				if (this.didRejectTool) {
 					// ignore any tool content after user has rejected tool once
 					if (!block.partial) {
@@ -1700,6 +1714,7 @@ export class Cline {
 					break
 				}
 
+				// 如果用户已经使用了工具，由于一个 Message 最多只允许一个 工具调用，将警告的消息添加到 userMessageContent 中
 				if (this.didAlreadyUseTool) {
 					// ignore any content after a tool has already been used
 					this.userMessageContent.push({
@@ -1709,6 +1724,10 @@ export class Cline {
 					break
 				}
 
+				/** 
+				 * 将工具调用的结果添加到 userMessageContent 中，并设置 didAlreadyUseTool 为 true，以防止在同一消息中使用多个工具。
+				 * @param content 工具的结果
+				 */
 				const pushToolResult = (content: ToolResponse) => {
 					this.userMessageContent.push({
 						type: "text",
@@ -1726,6 +1745,13 @@ export class Cline {
 					this.didAlreadyUseTool = true
 				}
 
+				/**
+				 * 执行 ClineAsk 类型的请求（这里应该主要是工具调用请求 "tool"）
+				 * 如果用户拒绝了请求，则返回 false，否则返回 true。
+				 * @param type 要执行的 ClineAsk 类型
+				 * @param partialMessage 不完整的字符串消息
+				 * @returns 用户是否批准了 ClineAsk 类型的请求
+				 */
 				const askApproval = async (type: ClineAsk, partialMessage?: string) => {
 					const { response, text, images } = await this.ask(type, partialMessage, false)
 					if (response !== "yesButtonClicked") {
@@ -1807,6 +1833,7 @@ export class Cline {
 					await this.browserSession.closeBrowser()
 				}
 
+				// 【核心交互】各种工具"tool_use"的处理
 				switch (block.name) {
 					case "write_to_file":
 					case "replace_in_file": {
@@ -2226,13 +2253,16 @@ export class Cline {
 							break
 						}
 					}
+					// 【AST】目前唯一使用代码解析的工具
 					case "list_code_definition_names": {
 						const relDirPath: string | undefined = block.params.path
+						// 向前端传递的参数是 "listCodeDefinitionNames"，显示不同的提示文字（webview-ui\src\components\chat\ChatRow.tsx）
 						const sharedMessageProps: ClineSayTool = {
 							tool: "listCodeDefinitionNames",
 							path: getReadablePath(cwd, removeClosingTag("path", relDirPath)),
 						}
 						try {
+							// 如果当前 Assisant Message 是“不完整”的
 							if (block.partial) {
 								const partialMessage = JSON.stringify({
 									...sharedMessageProps,
@@ -2247,6 +2277,8 @@ export class Cline {
 								}
 								break
 							} else {
+								// 如果当前 Assistant Message 是“完整的”
+								// NOTE: 如果没有提供 相对路径工具参数 relDirPath，则将 consecutiveMistakeCount 加 1，并将 “工具调用时参数缺失” 的错误消息 添加到 userMessageContent 中
 								if (!relDirPath) {
 									this.consecutiveMistakeCount++
 									pushToolResult(await this.sayAndCreateMissingParamError("list_code_definition_names", "path"))
@@ -2256,6 +2288,7 @@ export class Cline {
 
 								this.consecutiveMistakeCount = 0
 
+								// NOTE: 解析绝对路径下的 代码文件，生成 AST 字符串
 								const absolutePath = path.resolve(cwd, relDirPath)
 								const result = await parseSourceCodeForDefinitionsTopLevel(
 									absolutePath,
@@ -2924,6 +2957,7 @@ export class Cline {
 							break
 						}
 					}
+					// 【核心交互】如果没有其他工具可以执行，那么正常来说，就会执行这个工具
 					case "attempt_completion": {
 						/*
 						this.consecutiveMistakeCount = 0
