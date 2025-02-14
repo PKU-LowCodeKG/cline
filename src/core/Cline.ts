@@ -228,6 +228,7 @@ export class Cline {
 	// #endregion
 
 	// #region Cline Message 历史（用于 webview 呈现） [context.globalStorageUri.fsPath]/tasks/ui_messages.json
+	// FIXME 如何计算需要 截断删除的 API 对话历史？（以及吐槽一句 API 对话历史的删除范围，其值的更新居然是在 Cline Message 相关的函数中的）
 
 	/** 读取 uiMessages 文件中记录的 Cline Message 数组，只在 `resumeTaskFromHistory()` 中使用  */
 	private async getSavedClineMessages(): Promise<ClineMessage[]> {
@@ -1373,7 +1374,6 @@ export class Cline {
 	 * 4. 如果之前的 API 请求的 token 使用量接近上下文窗口的最大值，则截断 LLM API 对话历史记录
 	 * 5. `SYSTEM PROMPT` + `User Instructions` + 截断后的 LLM API 对话历史记录，提供给模型
 	 * 6. 获取返回的流并创建异步迭代器。处理 API 请求和重试
-	 * 以 chunk 形式 流式返回 LLM 的回复结果
 	 * @param previousApiReqIndex 
 	 * @returns 
 	 */
@@ -3266,6 +3266,7 @@ export class Cline {
 			// NOTE: Assistant Message 数组在流程中，第一次初始化
 			this.assistantMessageContent = []
 			this.didCompleteReadingStream = false
+			// NOTE: user Message Content 数组在流程中，第一次初始化
 			this.userMessageContent = []
 			this.userMessageContentReady = false
 			this.didRejectTool = false
@@ -3375,6 +3376,8 @@ export class Cline {
 
 			// set any blocks to be complete to allow presentAssistantMessage to finish and set userMessageContentReady to true
 			// (could be a text block that had no subsequent tool uses, or a text block at the very end, or an invalid tool use, etc. whatever the case, presentAssistantMessage relies on these blocks either to be completed or the user to reject a block in order to proceed and eventually set userMessageContentReady to true)
+			// NOTE: 将所有“不完整”的块（即 AssistantMessage）为 “已完成” 状态（设置 partial 为 false），进而允许 presentAssistantMessage “完成”，并设置 userMessageContentReady 为 true
+			//（可以是 后面不挨着 tool_use 的文本块，或者是最后的文本块，或者是无效的 tool_use…… 无论哪种情况，presentAssistantMessage 都依赖于：这些块要么 “已完成”，要么用户已拒绝某个块，以便继续进行 并最终将 userMessageContentReady 设置为 true）
 			const partialBlocks = this.assistantMessageContent.filter((block) => block.partial)
 			partialBlocks.forEach((block) => {
 				block.partial = false
@@ -3391,6 +3394,9 @@ export class Cline {
 			// now add to apiconversationhistory
 			// need to save assistant responses to file before proceeding to tool use since user can exit at any moment and we wouldn't be able to save the assistant's response
 			let didEndLoop = false
+			// NOTE: assistantMessage 此时是 原始的 LLM response 加上了 3 种说明之一（this.abort、this.didRejectTool、this.didAlreadyUseTool）
+			// - 在之前处理 LLM response 的流式结果时，this.abort 为 true，则利用 abortStream 中加入对话历史
+			// - 否则，在下面 将其加入对话历史
 			if (assistantMessage.length > 0) {
 				await this.addToApiConversationHistory({
 					role: "assistant",
@@ -3408,6 +3414,7 @@ export class Cline {
 				await pWaitFor(() => this.userMessageContentReady)
 
 				// if the model did not tool use, then we need to tell it to either use a tool or attempt_completion
+				// NOTE: 如果模型没有进行 tool use。我们需要告知它要么进行，要么使用特殊的 tool use "attempt_completion"
 				const didToolUse = this.assistantMessageContent.some((block) => block.type === "tool_use")
 
 				if (!didToolUse) {
