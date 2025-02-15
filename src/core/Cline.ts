@@ -90,6 +90,7 @@ export class Cline {
 	autoApprovalSettings: AutoApprovalSettings
 	private browserSettings: BrowserSettings
 	private chatSettings: ChatSettings
+	/** Cline LLM API 对话历史，用作上下文的一部分提供给 各种 LLM */
 	apiConversationHistory: Anthropic.MessageParam[] = []
 	/** Cline Message 历史，用于 webview 呈现 */
 	clineMessages: ClineMessage[] = []
@@ -191,9 +192,13 @@ export class Cline {
 	}
 
 	// #region 当前任务的 LLM API 对话历史。
-	// FIXME 这里的 API 对话历史均为 Anthropic.MessageParam[] ，其他 LLM API 是否需要转化？
-	// 只提供了Gemini O1 openai 格式同 anthropic.message 相互转换的方法 但是在实际代码中并未调用这几个方法
-	// 提供的 ConvertToO1Messages 和 ConvertToOpenAiMessages 转换方法比较常用
+	// 【主线】【LLM API 对话历史】
+	// 1. Cline LLM API 对话历史 均以 Anthropic.MessageParam[] 形式记录
+	// 2. 根据 `attemptApiRequest` 函数，Cline 和 LLM 交互时，将 LLM API 对话历史 发送给 ApiHandler 接口的 `createMessage` 方法
+	// 3. ApiHandler 接口由各种 LLM 实现，在 `createMessage` 方法中，将 Anthropic.MessageParam[] 形式转为符合自己的格式
+	//    - 其中 ConvertToO1Messages 和 ConvertToOpenAiMessages 转换方法比较常用
+	//    - 此外，只实现了 Gemini O1 openai 格式同 anthropic.message 相互转换的方法，但是在实际代码中并未调用这几个方法
+	// 4. 对于 LLM response，根据 `attemptApiRequest` 函数，Cline 会将 LLM response 转为 Anthropic.MessageParam[] 形式，存入 LLM API 对话历史（ApiConversationHistory 的维护） 
 
 	/** 从 api_conversation_history.json 读取当前任务的 LLM API 对话历史数组 */
 	private async getSavedApiConversationHistory(): Promise<Anthropic.MessageParam[]> {
@@ -229,7 +234,7 @@ export class Cline {
 	}
 	// #endregion
 
-	// #region Cline Message 历史（用于 webview 呈现） [context.globalStorageUri.fsPath]/tasks/ui_messages.json
+	// #region Cline Message 消息数组的维护（用于 webview 呈现），会影响到任务历史 HistoryItem
 	// FIXME 如何计算需要 截断删除的 API 对话历史？（以及吐槽一句 API 对话历史的删除范围，其值的更新居然是在 Cline Message 相关的函数中的）
 
 	/** 读取 uiMessages 文件中记录的 Cline Message 数组，只在 `resumeTaskFromHistory()` 中使用  */
@@ -264,7 +269,11 @@ export class Cline {
 		await this.saveClineMessages()
 	}
 
-	/** TODO: 这里不太懂，貌似只是更新了相关任务 的时间戳、API 消耗指标等 */
+	/**
+	 * 【主线】【Cline Message】更新当前 Cline 实例 绑定的 任务的 时间戳、API 消耗指标等
+	 * 
+	 * 因 Cline Message 数组的变动而对任务历史 HistoryItem 进行更新
+	 */
 	private async saveClineMessages() {
 		try {
 			const taskDir = await this.ensureTaskDirectoryExists()
@@ -274,7 +283,7 @@ export class Cline {
 			// NOTE: 在不影响原数组内容的前提下，计算 ClineMessages 数组的 API 指标
 			const apiMetrics = getApiMetrics(combineApiRequests(combineCommandSequences(this.clineMessages.slice(1))))
 			const taskMessage = this.clineMessages[0] // first message is always the task say
-			// NOTE: 找到最后一个 ask 属性不是 resume_task 或 resume_completed_task 的消息，用这个消息的时间戳作为历史记录的时间戳
+			// NOTE: 找到最后一个 不是“恢复任务”/“恢复已完成的任务” 的消息，用这个消息的时间戳作为 当前任务历史 的时间戳
 			const lastRelevantMessage =
 				this.clineMessages[
 					findLastIndex(this.clineMessages, (m) => !(m.ask === "resume_task" || m.ask === "resume_completed_task"))
@@ -308,7 +317,6 @@ export class Cline {
 	// #endregion
 
 	// #region Checkpoint 的恢复和保存，用于实现 diff 功能
-
 	/**
 	 * 恢复到指定的时间点。
 	 * 
@@ -611,9 +619,9 @@ export class Cline {
 	 * 由 `handleWebviewAskResponse()` 函数设置 Cline 实例的 askResponse 3 个属性。
 	 * 
 	 * partial 变量有三个有效的状态：
-	 *    - true：表示当前是一个部分消息，也就是说，这条消息还没有完整接收或处理，只有部分内容。
-	 *    - false：表示这条消息已经完成，即消息的内容已经完整地接收或处理完毕。
-	 *    - undefined：表示这条消息是一个独立的完整消息，即它是独立的、完整的，没有处于“部分消息”的状态。
+	 *    - true：表示当前是一个部分消息，即这条消息还没有完整接收或处理，只有部分内容。【被截断的消息的一部分】
+	 *    - false：表示这条消息已经完成，即消息的内容已经完整地接收或处理完毕。【被截断的消息的所有部分拼合完整】
+	 *    - undefined：表示这条消息是一个独立的完整消息。【未被截断的完整独立消息】
 	 */
 	async ask(
 		type: ClineAsk,
@@ -852,6 +860,12 @@ export class Cline {
 		return formatResponse.toolError(formatResponse.missingToolParameterError(paramName))
 	}
 
+	/**
+	 * 如果当前 Cline 实例的 clineMessages 历史队列的最后一条消息 “不完整”，且其 ask 或 say 属性与提供的 askOrSay 参数相同，则：
+	 * 1. 删除该消息。
+	 * 2. 保存 Cline Messages 队列的状态。
+	 * 3. 向 webview 发送当前插件状态。
+	 */
 	async removeLastPartialMessageIfExistsWithType(type: "ask" | "say", askOrSay: ClineAsk | ClineSay) {
 		const lastMessage = this.clineMessages.at(-1)
 		if (lastMessage?.partial && lastMessage.type === type && (lastMessage.ask === askOrSay || lastMessage.say === askOrSay)) {
@@ -869,6 +883,7 @@ export class Cline {
 	 * 1. 清空 Cline 实例的 对话历史（API）和 ClineMessage 消息（webview 显示）
 	 * 2. say("text", task, images)
 	 * 3. 初始化任务循环
+	 * 【这个函数只在 Cline 构造函数使用，再次说明 Cline 实例的生命周期 和 任务 相同，一个 Cline 实例只能处理一个 任务】
 	 */
 	private async startTask(task?: string, images?: string[]): Promise<void> {
 		// conversationHistory (for API) and clineMessages (for webview) need to be in sync
@@ -903,6 +918,7 @@ export class Cline {
 	 * 3. 删除没有任何“部分内容”流式传输的 api_req_started
 	 * 4. 用修改后的 ClineMessage 数组覆盖保存
 	 * 【之后是同步 API 对话历史，这里暂时略过】
+	 * 【这个函数只在 Cline 构造函数使用，再次说明 Cline 实例的生命周期 和 任务 相同，一个 Cline 实例只能处理一个 任务】
 	 */
 	private async resumeTaskFromHistory() {
 		// TODO: right now we let users init checkpoints for old tasks, assuming they're continuing them from the same workspace (which we never tied to tasks, so no way for us to know if it's opened in the right workspace)
@@ -1229,7 +1245,6 @@ export class Cline {
 	 * 保存检查点的异步方法。
 	 * 
 	 * 此方法会尝试提交一个检查点，并根据不同情况更新聊天消息中的检查点信息。
-	 * 
 	 * @param {boolean} [isAttemptCompletionMessage=false] - 指示是否将当前操作视为尝试完成消息的操作。
 	 *                                                    
 	 */
@@ -1417,9 +1432,11 @@ export class Cline {
 	/**
 	 * 【主线】该函数是一个异步生成器函数，非常适合处理需要逐步获取的 API 数据流
 	 * 
-	 * 【核心交互函数】以 ApiStreamChunk 形式（"text"、"reasoning"、"usage" 三种类型）流式返回 LLM 的回复结果
+	 * 【核心交互】以 ApiStreamChunk 形式（"text"、"reasoning"、"usage" 三种类型）流式返回 LLM 的回复结果
 	 * 1. 读取工具支持配置（MCP、Claude Computer Use）
 	 * 2. 结合 cwd、模型对工具支持情况、MCP Hub 和浏览器设置等信息 生成 `SYSTEM PROMPT`
+	 *    - SYSTEM PROMPT 给出了目前 Cline 定义的 ToolUse 信息（功能描述 + 参数）
+	 *    - 换言之，**Cline 中工具的使用完全是由模型来最终决定的，用户的信息只能作为诱导模型的因素**
 	 * 3. 获取用户自定义指令（Custom Instructions）、.clinerules 文件中的指令、.clineignore 文件中的内容，生成相应的 `User Instructions` 提示
 	 * 4. 如果之前的 API 请求的 token 使用量接近上下文窗口的最大值，则截断 LLM API 对话历史记录
 	 * 5. `SYSTEM PROMPT` + `User Instructions` + 截断后的 LLM API 对话历史记录，提供给模型
@@ -1714,7 +1731,7 @@ export class Cline {
 					break
 				}
 
-				// 如果用户已经使用了工具，由于一个 Message 最多只允许一个 工具调用，将警告的消息添加到 userMessageContent 中
+				// 如果用户已经使用了工具，由于一个 Assistant Message 最多只允许一个 工具调用，将警告的消息添加到 userMessageContent 中
 				if (this.didAlreadyUseTool) {
 					// ignore any content after a tool has already been used
 					this.userMessageContent.push({

@@ -513,7 +513,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	}
 
 	/**
-	 * NOTE: 设置一个事件侦听器来侦听从 webview 上下文传递的消息，并根据收到的消息执行代码。
+	 * 【主线】设置一个事件侦听器来侦听从 webview 上下文传递的消息，并根据收到的消息执行代码。
 	 * 其实就是把 `webview.onDidReceiveMessage()` 封装了一层
 	 * 
 	 * Sets up an event listener to listen for messages passed from the webview context and
@@ -2003,9 +2003,10 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	}
 
 	/**
-	 * 根据参数任务 id 更新历史记录
-	 * @param item 要更新的历史记录 HistoryItem
-	 * @returns 现在所有的历史记录
+	 * 根据参数任务 id 更新 Task 历史记录
+	 * 【吐槽】目前只在 Cline.ts 中的 saveClineMessages() 方法中调用
+	 * @param item 要更新的 Task 历史记录 HistoryItem
+	 * @returns 现在所有的 Task 历史记录
 	 */
 	async updateTaskHistory(item: HistoryItem): Promise<HistoryItem[]> {
 		const history = ((await this.getGlobalState("taskHistory")) as HistoryItem[]) || []
