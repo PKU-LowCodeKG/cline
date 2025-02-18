@@ -38,111 +38,188 @@ export function openMention(mention?: string): void {
 	}
 }
 
+/**
+ * 解析文本中的提及内容，并将提及内容的详细信息追加到解析后的文本中。
+ * @param text - 包含提及内容的原始文本。
+ * @param cwd - 当前工作目录的路径。
+ * @param urlContentFetcher - 用于从URL获取内容并转换为Markdown的工具实例。
+ * @returns 解析后的文本，包含原始文本和提及内容的详细信息。
+ */
 export async function parseMentions(text: string, cwd: string, urlContentFetcher: UrlContentFetcher): Promise<string> {
-	const mentions: Set<string> = new Set()
-	let parsedText = text.replace(mentionRegexGlobal, (match, mention) => {
-		mentions.add(mention)
-		if (mention.startsWith("http")) {
-			return `'${mention}' (see below for site content)`
-		} else if (mention.startsWith("/")) {
-			const mentionPath = mention.slice(1) // Remove the leading '/'
-			return mentionPath.endsWith("/")
-				? `'${mentionPath}' (see below for folder content)`
-				: `'${mentionPath}' (see below for file content)`
-		} else if (mention === "problems") {
-			return `Workspace Problems (see below for diagnostics)`
-		} else if (mention === "terminal") {
-			return `Terminal Output (see below for output)`
-		} else if (mention === "git-changes") {
-			return `Working directory changes (see below for details)`
-		} else if (/^[a-f0-9]{7,40}$/.test(mention)) {
-			return `Git commit '${mention}' (see below for commit info)`
-		}
-		return match
-	})
+    // 创建一个Set来存储文本中出现的所有提及内容，Set可以确保元素的唯一性
+    const mentions: Set<string> = new Set();
 
-	const urlMention = Array.from(mentions).find((mention) => mention.startsWith("http"))
-	let launchBrowserError: Error | undefined
-	if (urlMention) {
-		try {
-			await urlContentFetcher.launchBrowser()
-		} catch (error) {
-			launchBrowserError = error
-			vscode.window.showErrorMessage(`Error fetching content for ${urlMention}: ${error.message}`)
-		}
-	}
+    // 使用正则表达式匹配文本中的提及内容，并对其进行替换处理
+    let parsedText = text.replace(mentionRegexGlobal, (match, mention) => {
+        // 将匹配到的提及内容添加到Set中
+        mentions.add(mention);
 
-	for (const mention of mentions) {
-		if (mention.startsWith("http")) {
-			let result: string
-			if (launchBrowserError) {
-				result = `Error fetching content: ${launchBrowserError.message}`
-			} else {
-				try {
-					const markdown = await urlContentFetcher.urlToMarkdown(mention)
-					result = markdown
-				} catch (error) {
-					vscode.window.showErrorMessage(`Error fetching content for ${mention}: ${error.message}`)
-					result = `Error fetching content: ${error.message}`
-				}
-			}
-			parsedText += `\n\n<url_content url="${mention}">\n${result}\n</url_content>`
-		} else if (mention.startsWith("/")) {
-			const mentionPath = mention.slice(1)
-			try {
-				const content = await getFileOrFolderContent(mentionPath, cwd)
-				if (mention.endsWith("/")) {
-					parsedText += `\n\n<folder_content path="${mentionPath}">\n${content}\n</folder_content>`
-				} else {
-					parsedText += `\n\n<file_content path="${mentionPath}">\n${content}\n</file_content>`
-				}
-			} catch (error) {
-				if (mention.endsWith("/")) {
-					parsedText += `\n\n<folder_content path="${mentionPath}">\nError fetching content: ${error.message}\n</folder_content>`
-				} else {
-					parsedText += `\n\n<file_content path="${mentionPath}">\nError fetching content: ${error.message}\n</file_content>`
-				}
-			}
-		} else if (mention === "problems") {
-			try {
-				const problems = getWorkspaceProblems(cwd)
-				parsedText += `\n\n<workspace_diagnostics>\n${problems}\n</workspace_diagnostics>`
-			} catch (error) {
-				parsedText += `\n\n<workspace_diagnostics>\nError fetching diagnostics: ${error.message}\n</workspace_diagnostics>`
-			}
-		} else if (mention === "terminal") {
-			try {
-				const terminalOutput = await getLatestTerminalOutput()
-				parsedText += `\n\n<terminal_output>\n${terminalOutput}\n</terminal_output>`
-			} catch (error) {
-				parsedText += `\n\n<terminal_output>\nError fetching terminal output: ${error.message}\n</terminal_output>`
-			}
-		} else if (mention === "git-changes") {
-			try {
-				const workingState = await getWorkingState(cwd)
-				parsedText += `\n\n<git_working_state>\n${workingState}\n</git_working_state>`
-			} catch (error) {
-				parsedText += `\n\n<git_working_state>\nError fetching working state: ${error.message}\n</git_working_state>`
-			}
-		} else if (/^[a-f0-9]{7,40}$/.test(mention)) {
-			try {
-				const commitInfo = await getCommitInfo(mention, cwd)
-				parsedText += `\n\n<git_commit hash="${mention}">\n${commitInfo}\n</git_commit>`
-			} catch (error) {
-				parsedText += `\n\n<git_commit hash="${mention}">\nError fetching commit info: ${error.message}\n</git_commit>`
-			}
-		}
-	}
+        // 如果提及内容是一个URL
+        if (mention.startsWith("http")) {
+            // 将其替换为特定格式的文本，提示用户可以查看下方的网站内容
+            return `'${mention}' (see below for site content)`;
+        } 
+        // 如果提及内容是一个以斜杠开头的路径
+        else if (mention.startsWith("/")) {
+            // 去除路径前面的斜杠
+            const mentionPath = mention.slice(1);
+            // 判断路径是否以斜杠结尾，如果是则表示是文件夹，否则表示是文件
+            return mentionPath.endsWith("/")
+                ? `'${mentionPath}' (see below for folder content)`
+                : `'${mentionPath}' (see below for file content)`;
+        } 
+        // 如果提及内容是 "problems"
+        else if (mention === "problems") {
+            // 将其替换为提示用户查看下方工作区诊断信息的文本
+            return `Workspace Problems (see below for diagnostics)`;
+        } 
+        // 如果提及内容是 "terminal"
+        else if (mention === "terminal") {
+            // 将其替换为提示用户查看下方终端输出信息的文本
+            return `Terminal Output (see below for output)`;
+        } 
+        // 如果提及内容是 "git-changes"
+        else if (mention === "git-changes") {
+            // 将其替换为提示用户查看下方工作目录更改详细信息的文本
+            return `Working directory changes (see below for details)`;
+        } 
+        // 如果提及内容是一个7到40位的十六进制字符串，可能是Git提交哈希值
+        else if (/^[a-f0-9]{7,40}$/.test(mention)) {
+            // 将其替换为提示用户查看下方提交信息的文本
+            return `Git commit '${mention}' (see below for commit info)`;
+        }
+        // 如果都不匹配，则返回原始匹配内容
+        return match;
+    });
 
-	if (urlMention) {
-		try {
-			await urlContentFetcher.closeBrowser()
-		} catch (error) {
-			console.error(`Error closing browser: ${error.message}`)
-		}
-	}
+    // 从提及内容的Set中查找第一个以 "http" 开头的URL
+    const urlMention = Array.from(mentions).find((mention) => mention.startsWith("http"));
+    // 用于存储启动浏览器时可能出现的错误
+    let launchBrowserError: Error | undefined;
 
-	return parsedText
+    // 如果存在URL提及内容
+    if (urlMention) {
+        try {
+            // 启动浏览器，以便后续获取URL的内容
+            await urlContentFetcher.launchBrowser();
+        } catch (error) {
+            // 捕获启动浏览器时的错误
+            launchBrowserError = error as Error;
+            // 在VS Code窗口中显示错误消息，提示用户获取URL内容时出错
+            vscode.window.showErrorMessage(`Error fetching content for ${urlMention}: ${error.message}`);
+        }
+    }
+
+    // 遍历所有的提及内容
+    for (const mention of mentions) {
+        // 如果提及内容是一个URL
+        if (mention.startsWith("http")) {
+            let result: string;
+            // 如果启动浏览器时出现错误
+            if (launchBrowserError) {
+                // 结果显示为获取内容时的错误信息
+                result = `Error fetching content: ${launchBrowserError.message}`;
+            } else {
+                try {
+                    // 使用UrlContentFetcher工具从URL获取内容并转换为Markdown格式
+                    const markdown = await urlContentFetcher.urlToMarkdown(mention);
+                    result = markdown;
+                } catch (error) {
+                    // 捕获获取URL内容时的错误
+                    vscode.window.showErrorMessage(`Error fetching content for ${mention}: ${error.message}`);
+                    result = `Error fetching content: ${error.message}`;
+                }
+            }
+            // 将URL的内容或错误信息以特定的标签格式追加到解析后的文本中
+            parsedText += `\n\n<url_content url="${mention}">\n${result}\n</url_content>`;
+        } 
+        // 如果提及内容是一个以斜杠开头的路径
+        else if (mention.startsWith("/")) {
+            // 去除路径前面的斜杠
+            const mentionPath = mention.slice(1);
+            try {
+                // 获取文件或文件夹的内容
+                const content = await getFileOrFolderContent(mentionPath, cwd);
+                if (mention.endsWith("/")) {
+                    // 如果是文件夹，将文件夹内容以特定的标签格式追加到解析后的文本中
+                    parsedText += `\n\n<folder_content path="${mentionPath}">\n${content}\n</folder_content>`;
+                } else {
+                    // 如果是文件，将文件内容以特定的标签格式追加到解析后的文本中
+                    parsedText += `\n\n<file_content path="${mentionPath}">\n${content}\n</file_content>`;
+                }
+            } catch (error) {
+                if (mention.endsWith("/")) {
+                    // 如果是文件夹，将获取文件夹内容时的错误信息以特定的标签格式追加到解析后的文本中
+                    parsedText += `\n\n<folder_content path="${mentionPath}">\nError fetching content: ${error.message}\n</folder_content>`;
+                } else {
+                    // 如果是文件，将获取文件内容时的错误信息以特定的标签格式追加到解析后的文本中
+                    parsedText += `\n\n<file_content path="${mentionPath}">\nError fetching content: ${error.message}\n</file_content>`;
+                }
+            }
+        } 
+        // 如果提及内容是 "problems"
+        else if (mention === "problems") {
+            try {
+                // 获取工作区的问题诊断信息
+                const problems = getWorkspaceProblems(cwd);
+                // 将工作区问题诊断信息以特定的标签格式追加到解析后的文本中
+                parsedText += `\n\n<workspace_diagnostics>\n${problems}\n</workspace_diagnostics>`;
+            } catch (error) {
+                // 将获取工作区问题诊断信息时的错误信息以特定的标签格式追加到解析后的文本中
+                parsedText += `\n\n<workspace_diagnostics>\nError fetching diagnostics: ${error.message}\n</workspace_diagnostics>`;
+            }
+        } 
+        // 如果提及内容是 "terminal"
+        else if (mention === "terminal") {
+            try {
+                // 获取最新的终端输出信息
+                const terminalOutput = await getLatestTerminalOutput();
+                // 将终端输出信息以特定的标签格式追加到解析后的文本中
+                parsedText += `\n\n<terminal_output>\n${terminalOutput}\n</terminal_output>`;
+            } catch (error) {
+                // 将获取终端输出信息时的错误信息以特定的标签格式追加到解析后的文本中
+                parsedText += `\n\n<terminal_output>\nError fetching terminal output: ${error.message}\n</terminal_output>`;
+            }
+        } 
+        // 如果提及内容是 "git-changes"
+        else if (mention === "git-changes") {
+            try {
+                // 获取工作目录的Git状态信息
+                const workingState = await getWorkingState(cwd);
+                // 将工作目录的Git状态信息以特定的标签格式追加到解析后的文本中
+                parsedText += `\n\n<git_working_state>\n${workingState}\n</git_working_state>`;
+            } catch (error) {
+                // 将获取工作目录Git状态信息时的错误信息以特定的标签格式追加到解析后的文本中
+                parsedText += `\n\n<git_working_state>\nError fetching working state: ${error.message}\n</git_working_state>`;
+            }
+        } 
+        // 如果提及内容是一个7到40位的十六进制字符串，可能是Git提交哈希值
+        else if (/^[a-f0-9]{7,40}$/.test(mention)) {
+            try {
+                // 获取指定Git提交的详细信息
+                const commitInfo = await getCommitInfo(mention, cwd);
+                // 将Git提交信息以特定的标签格式追加到解析后的文本中
+                parsedText += `\n\n<git_commit hash="${mention}">\n${commitInfo}\n</git_commit>`;
+            } catch (error) {
+                // 将获取Git提交信息时的错误信息以特定的标签格式追加到解析后的文本中
+                parsedText += `\n\n<git_commit hash="${mention}">\nError fetching commit info: ${error.message}\n</git_commit>`;
+            }
+        }
+    }
+
+    // 如果存在URL提及内容
+    if (urlMention) {
+        try {
+            // 关闭浏览器，释放资源
+            await urlContentFetcher.closeBrowser();
+        } catch (error) {
+            // 捕获关闭浏览器时的错误，并在控制台输出错误信息
+            console.error(`Error closing browser: ${error.message}`);
+        }
+    }
+
+    // 返回解析后的文本，包含原始文本和提及内容的详细信息
+    return parsedText;
 }
 
 async function getFileOrFolderContent(mentionPath: string, cwd: string): Promise<string> {
