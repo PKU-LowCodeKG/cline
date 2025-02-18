@@ -59,6 +59,7 @@ type SecretKey =
 	| "togetherApiKey"
 	| "qwenApiKey"
 	| "mistralApiKey"
+	| "liteLlmApiKey"
 	| "authToken"
 	| "authNonce"
 /**
@@ -79,6 +80,7 @@ type GlobalStateKey =
 	| "taskHistory"
 	| "openAiBaseUrl"
 	| "openAiModelId"
+	| "openAiModelInfo"
 	| "ollamaModelId"
 	| "ollamaBaseUrl"
 	| "lmStudioModelId"
@@ -100,6 +102,7 @@ type GlobalStateKey =
 	| "qwenApiLine"
 	| "requestyModelId"
 	| "togetherModelId"
+	| "mcpMarketplaceCatalog"
 
 /** 
  * Cline 的全局文件名
@@ -119,7 +122,7 @@ export const GlobalFileNames = {
 	openRouterModels: "openrouter_models.json",
 	/** 存放 Cline 的 MCP 设置文件 */
 	mcpSettings: "cline_mcp_settings.json",
-	clineRules: ".clinerules", // .clinerules
+	clineRules: ".clinerules",
 }
 
 /**
@@ -554,6 +557,9 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						// gui relies on model info to be up-to-date to provide the most accurate pricing, so we need to fetch the latest details on launch.
 						// we do this for all users since many users switch between api providers and if they were to switch back to openrouter it would be showing outdated model info if we hadn't retrieved the latest at this point
 						// (see normalizeApiConfiguration > openrouter)
+						// Prefetch marketplace and OpenRouter models
+
+						this.prefetchMcpMarketplace()
 						// 刷新 OpenRouter 模型信息并更新状态
 						this.refreshOpenRouterModels().then(async (openRouterModels) => {
 							if (openRouterModels) {
@@ -603,6 +609,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 								openAiBaseUrl,
 								openAiApiKey,
 								openAiModelId,
+								openAiModelInfo,
 								ollamaModelId,
 								ollamaBaseUrl,
 								lmStudioModelId,
@@ -623,6 +630,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 								vsCodeLmModelSelector,
 								liteLlmBaseUrl,
 								liteLlmModelId,
+								liteLlmApiKey,
 								qwenApiLine,
 							} = message.apiConfiguration
 							// 更新全局状态和密钥
@@ -642,6 +650,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 							await this.updateGlobalState("openAiBaseUrl", openAiBaseUrl)
 							await this.storeSecret("openAiApiKey", openAiApiKey)
 							await this.updateGlobalState("openAiModelId", openAiModelId)
+							await this.updateGlobalState("openAiModelInfo", openAiModelInfo)
 							await this.updateGlobalState("ollamaModelId", ollamaModelId)
 							await this.updateGlobalState("ollamaBaseUrl", ollamaBaseUrl)
 							await this.updateGlobalState("lmStudioModelId", lmStudioModelId)
@@ -654,6 +663,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 							await this.storeSecret("togetherApiKey", togetherApiKey)
 							await this.storeSecret("qwenApiKey", qwenApiKey)
 							await this.storeSecret("mistralApiKey", mistralApiKey)
+							await this.storeSecret("liteLlmApiKey", liteLlmApiKey)
 							await this.updateGlobalState("azureApiVersion", azureApiVersion)
 							await this.updateGlobalState("openRouterModelId", openRouterModelId)
 							await this.updateGlobalState("openRouterModelInfo", openRouterModelInfo)
@@ -726,6 +736,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 									break
 								case "openai":
 									await this.updateGlobalState("previousModeModelId", apiConfiguration.openAiModelId)
+									await this.updateGlobalState("previousModeModelInfo", apiConfiguration.openAiModelInfo)
 									break
 								case "ollama":
 									await this.updateGlobalState("previousModeModelId", apiConfiguration.ollamaModelId)
@@ -758,6 +769,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 										break
 									case "openai":
 										await this.updateGlobalState("openAiModelId", newModelId)
+										await this.updateGlobalState("openAiModelInfo", newModelInfo)
 										break
 									case "ollama":
 										await this.updateGlobalState("ollamaModelId", newModelId)
@@ -906,8 +918,11 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 					}
 					case "checkpointRestore": {
 						// 恢复到指定检查点
-						await this.cancelTask() // 取消当前任务，避免任务状态冲突
+						// 取消当前任务，避免任务状态冲突
+						await this.cancelTask() // we cannot alter message history say if the task is active, as it could be in the middle of editing a file or running a command, which expect the ask to be responded to rather than being superceded by a new message eg add deleted_api_reqs
+						// cancel task waits for any open editor to be reverted and starts a new cline instance
 						if (message.number) {
+							// wait for messages to be loaded
 							// 等待 Cline 实例初始化
 							await pWaitFor(() => this.cline?.isInitialized === true, {
 								timeout: 3_000,
@@ -1191,6 +1206,8 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		await this.postStateToWebview()
 	}
 
+	// MCP
+
 	/**
 	 * 获取当前用户的文档目录路径。 只在MCP中用到
 	 * 
@@ -1266,6 +1283,176 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		} catch (error) {
 			console.error("Error fetching VS Code LM models:", error)
 			return []
+		}
+	}
+
+	// MCP Marketplace
+
+	private async fetchMcpMarketplaceFromApi(silent: boolean = false): Promise<McpMarketplaceCatalog | undefined> {
+		try {
+			const response = await axios.get("https://api.cline.bot/v1/mcp/marketplace", {
+				headers: {
+					"Content-Type": "application/json",
+				},
+			})
+
+			if (!response.data) {
+				throw new Error("Invalid response from MCP marketplace API")
+			}
+
+			const catalog: McpMarketplaceCatalog = {
+				items: (response.data || []).map((item: any) => ({
+					...item,
+					githubStars: item.githubStars ?? 0,
+					downloadCount: item.downloadCount ?? 0,
+					tags: item.tags ?? [],
+				})),
+			}
+
+			// Store in global state
+			await this.updateGlobalState("mcpMarketplaceCatalog", catalog)
+			return catalog
+		} catch (error) {
+			console.error("Failed to fetch MCP marketplace:", error)
+			if (!silent) {
+				const errorMessage = error instanceof Error ? error.message : "Failed to fetch MCP marketplace"
+				await this.postMessageToWebview({
+					type: "mcpMarketplaceCatalog",
+					error: errorMessage,
+				})
+				vscode.window.showErrorMessage(errorMessage)
+			}
+			return undefined
+		}
+	}
+
+	async prefetchMcpMarketplace() {
+		try {
+			await this.fetchMcpMarketplaceFromApi(true)
+		} catch (error) {
+			console.error("Failed to prefetch MCP marketplace:", error)
+		}
+	}
+
+	async silentlyRefreshMcpMarketplace() {
+		try {
+			const catalog = await this.fetchMcpMarketplaceFromApi(true)
+			if (catalog) {
+				await this.postMessageToWebview({
+					type: "mcpMarketplaceCatalog",
+					mcpMarketplaceCatalog: catalog,
+				})
+			}
+		} catch (error) {
+			console.error("Failed to silently refresh MCP marketplace:", error)
+		}
+	}
+
+	private async fetchMcpMarketplace(forceRefresh: boolean = false) {
+		try {
+			// Check if we have cached data
+			const cachedCatalog = (await this.getGlobalState("mcpMarketplaceCatalog")) as McpMarketplaceCatalog | undefined
+			if (!forceRefresh && cachedCatalog?.items) {
+				await this.postMessageToWebview({
+					type: "mcpMarketplaceCatalog",
+					mcpMarketplaceCatalog: cachedCatalog,
+				})
+				return
+			}
+
+			const catalog = await this.fetchMcpMarketplaceFromApi(false)
+			if (catalog) {
+				await this.postMessageToWebview({
+					type: "mcpMarketplaceCatalog",
+					mcpMarketplaceCatalog: catalog,
+				})
+			}
+		} catch (error) {
+			console.error("Failed to handle cached MCP marketplace:", error)
+			const errorMessage = error instanceof Error ? error.message : "Failed to handle cached MCP marketplace"
+			await this.postMessageToWebview({
+				type: "mcpMarketplaceCatalog",
+				error: errorMessage,
+			})
+			vscode.window.showErrorMessage(errorMessage)
+		}
+	}
+
+	private async downloadMcp(mcpId: string) {
+		try {
+			// First check if we already have this MCP server installed
+			const servers = this.mcpHub?.getServers() || []
+			const isInstalled = servers.some((server: McpServer) => server.name === mcpId)
+
+			if (isInstalled) {
+				throw new Error("This MCP server is already installed")
+			}
+
+			// Fetch server details from marketplace
+			const response = await axios.post<McpDownloadResponse>(
+				"https://api.cline.bot/v1/mcp/download",
+				{ mcpId },
+				{
+					headers: { "Content-Type": "application/json" },
+					timeout: 10000,
+				},
+			)
+
+			if (!response.data) {
+				throw new Error("Invalid response from MCP marketplace API")
+			}
+
+			console.log("[downloadMcp] Response from download API", { response })
+
+			const mcpDetails = response.data
+
+			// Validate required fields
+			if (!mcpDetails.githubUrl) {
+				throw new Error("Missing GitHub URL in MCP download response")
+			}
+			if (!mcpDetails.readmeContent) {
+				throw new Error("Missing README content in MCP download response")
+			}
+
+			// Send details to webview
+			await this.postMessageToWebview({
+				type: "mcpDownloadDetails",
+				mcpDownloadDetails: mcpDetails,
+			})
+
+			// Create task with context from README
+			const task = `Set up the MCP server from ${mcpDetails.githubUrl}. Use "${mcpDetails.mcpId}" as the server name in cline_mcp_settings.json. Here is the project's README to help you get started:\n\n${mcpDetails.readmeContent}\n${mcpDetails.llmsInstallationContent}`
+
+			// Initialize task and show chat view
+			await this.initClineWithTask(task)
+			await this.postMessageToWebview({
+				type: "action",
+				action: "chatButtonClicked",
+			})
+		} catch (error) {
+			console.error("Failed to download MCP:", error)
+			let errorMessage = "Failed to download MCP"
+
+			if (axios.isAxiosError(error)) {
+				if (error.code === "ECONNABORTED") {
+					errorMessage = "Request timed out. Please try again."
+				} else if (error.response?.status === 404) {
+					errorMessage = "MCP server not found in marketplace."
+				} else if (error.response?.status === 500) {
+					errorMessage = "Internal server error. Please try again later."
+				} else if (!error.response && error.request) {
+					errorMessage = "Network error. Please check your internet connection."
+				}
+			} else if (error instanceof Error) {
+				errorMessage = error.message
+			}
+
+			// Show error in both notification and marketplace UI
+			vscode.window.showErrorMessage(errorMessage)
+			await this.postMessageToWebview({
+				type: "mcpDownloadDetails",
+				error: errorMessage,
+			})
 		}
 	}
 
@@ -1910,6 +2097,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			openAiBaseUrl,
 			openAiApiKey,
 			openAiModelId,
+			openAiModelInfo,
 			ollamaModelId,
 			ollamaBaseUrl,
 			lmStudioModelId,
@@ -1942,6 +2130,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			previousModeModelId,
 			previousModeModelInfo,
 			qwenApiLine,
+			liteLlmApiKey,
 		] = await Promise.all([
 			this.getGlobalState("apiProvider") as Promise<ApiProvider | undefined>,
 			this.getGlobalState("apiModelId") as Promise<string | undefined>,
@@ -1959,6 +2148,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			this.getGlobalState("openAiBaseUrl") as Promise<string | undefined>,
 			this.getSecret("openAiApiKey") as Promise<string | undefined>,
 			this.getGlobalState("openAiModelId") as Promise<string | undefined>,
+			this.getGlobalState("openAiModelInfo") as Promise<ModelInfo | undefined>,
 			this.getGlobalState("ollamaModelId") as Promise<string | undefined>,
 			this.getGlobalState("ollamaBaseUrl") as Promise<string | undefined>,
 			this.getGlobalState("lmStudioModelId") as Promise<string | undefined>,
@@ -1991,6 +2181,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			this.getGlobalState("previousModeModelId") as Promise<string | undefined>,
 			this.getGlobalState("previousModeModelInfo") as Promise<ModelInfo | undefined>,
 			this.getGlobalState("qwenApiLine") as Promise<string | undefined>,
+			this.getSecret("liteLlmApiKey") as Promise<string | undefined>,
 		])
 
 		// 确定API提供者，如果未存储则根据条件设置默认值
@@ -2034,6 +2225,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 				openAiBaseUrl,
 				openAiApiKey,
 				openAiModelId,
+				openAiModelInfo,
 				ollamaModelId,
 				ollamaBaseUrl,
 				lmStudioModelId,
@@ -2056,6 +2248,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 				o3MiniReasoningEffort,
 				liteLlmBaseUrl,
 				liteLlmModelId,
+				liteLlmApiKey,
 			},
 			lastShownAnnouncementId,
 			customInstructions,
@@ -2198,6 +2391,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			"togetherApiKey",
 			"qwenApiKey",
 			"mistralApiKey",
+			"liteLlmApiKey",
 			"authToken",
 		]
 		for (const key of secretKeys) {

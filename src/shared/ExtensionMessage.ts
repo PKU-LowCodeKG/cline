@@ -93,6 +93,7 @@ export interface ClineMessage {
 	images?: string[]
 	partial?: boolean
 	lastCheckpointHash?: string
+	isCheckpointCheckedOut?: boolean
 	/** Cline Message 对应的 API 对话在 API 对话历史中的索引 */
 	conversationHistoryIndex?: number
 	conversationHistoryDeletedRange?: [number, number] // for when conversation history is truncated for API requests
@@ -137,6 +138,7 @@ export type ClineSay =
 	| "diff_error"
 	| "deleted_api_reqs"
 	| "clineignore_error"
+	| "checkpoint_created"
 
 export interface ClineSayTool {
 	tool:
