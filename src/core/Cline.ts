@@ -63,7 +63,18 @@ import { ClineProvider, GlobalFileNames } from "./webview/ClineProvider"
 const cwd = vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath).at(0) ?? path.join(os.homedir(), "Desktop") // may or may not exist but fs checking existence would immediately ask for permission which would be bad UX, need to come up with a better solution
 
 type ToolResponse = string | Array<Anthropic.TextBlockParam | Anthropic.ImageBlockParam>
-/** Cline 以 Anthropic 标准定义的用户上下文，包括：文本、图片、工具调用、工具调用结果 */
+/**
+ * Cline 的 API 对话中，"role"为"user"的 Anthropic 消息的"content"部分。
+ * 它是一个对象数组，包括：文本、图片、工具调用、工具调用结果
+ * "role": "user",
+ * "content": [
+ *     {
+ *         type: "text",
+ *         text: string
+ *     },
+ *     ...
+ * ]
+ */
 type UserContent = Array<
 	Anthropic.TextBlockParam | Anthropic.ImageBlockParam | Anthropic.ToolUseBlockParam | Anthropic.ToolResultBlockParam
 >
@@ -1173,6 +1184,8 @@ export class Cline {
 	/**
 	 * 【主线】初始化任务循环，对 userContent 进行递归处理
 	 *
+	 * 【LLM API 对话】userContent 是 Cline 的 API 对话中，"role"为"user"的 Anthropic 消息的"content"部分。它是一个对象数组，包括：文本、图片、工具调用、工具调用结果
+	 *
 	 * 任务的完成和 "attempt_completion" 工具的调用相关：
 	 * 1. 任务分配与工具调用：Cline 接受任务，并通过调用不同的工具来完成该任务。如果任务没有被标记为已完成（即没有调用 attempt_completion 工具），系统会继续将工具的响应反馈给 Cline，直到他调用 attempt_completion 或不再使用工具。
 	 * 2. 任务完成检查：如果 Cline 在一段时间内没有再调用工具，系统会提示他检查任务是否完成，并建议他调用 attempt_completion 来结束任务。如果他继续使用工具，系统会继续执行任务。
@@ -1181,7 +1194,7 @@ export class Cline {
 	 * 当执行 `abortTask()` 时，this.abort 被设置为 true
 	 * 1. `recursivelyMakeClineRequests()` 会打破递归，返回 true。终止 while 循环。
 	 * 2. while 循环也会因为 this.abort 被设置为 true 而结束。
-	 * @param userContent Cline 以 Anthropic 标准定义的用户上下文，包括：文本、图片、工具调用、工具调用结果
+	 * @param userContent Cline 的 API 对话中，"role"为"user"的 Anthropic 消息的"content"部分。它是一个对象数组，包括：文本、图片、工具调用、工具调用结果
 	 * @param isNewTask 是否是新任务
 	 */
 	private async initiateTaskLoop(userContent: UserContent, isNewTask: boolean): Promise<void> {
@@ -1192,7 +1205,7 @@ export class Cline {
 			if (includeFileDetails) {
 				// To Do: 在includeFileDetails == true的时候调用一次我们设计的函数。
 			}
-			
+
 			// NOTE: 只在最开始的时候（while 的第一次循环，下面这个函数的第一层递归） 包括当前工作目录下的文件列表。
 			const didEndLoop = await this.recursivelyMakeClineRequests(nextUserContent, includeFileDetails, isNewTask)
 			includeFileDetails = false // we only need file details the first time
@@ -3561,11 +3574,25 @@ export class Cline {
 		}
 	}
 
+	/**
+	 * 【主线】识别 "role"为"user"的 Anthropic 消息的"content"部分中 mentions（@），并解析它们。
+	 * 返回：
+	 * 1. 解析后的 userContent（用于构建 "role"为"user"的 Anthropic 消息）
+	 * 2. 当前开发环境信息（字符串）
+	 * 【mentions】Cline 中的 mentions 被定义为以 "@" 开头的字符串，代表 Cline 提供的辅助功能，如：解析 URL、提供文件路径等
+	 * @param userContent Cline 的 API 对话中，"role"为"user"的 Anthropic 消息的"content"部分。 它是一个对象数组，包括：文本、图片、工具调用、工具调用结果
+	 * @param includeFileDetails 是否包括当前工作目录下的文件列表。
+	 * @returns 返回一个 Promise，包含两个元素的数组：1. 解析后的 userContent；2. 当前开发环境信息（字符串）
+	 */
 	async loadContext(userContent: UserContent, includeFileDetails: boolean = false) {
 		return await Promise.all([
 			// This is a temporary solution to dynamically load context mentions from tool results. It checks for the presence of tags that indicate that the tool was rejected and feedback was provided (see formatToolDeniedFeedback, attemptCompletion, executeCommand, and consecutiveMistakeCount >= 3) or "<answer>" (see askFollowupQuestion), we place all user generated content in these tags so they can effectively be used as markers for when we should parse mentions). However if we allow multiple tools responses in the future, we will need to parse mentions specifically within the user content tags.
 			// (Note: this caused the @/ import alias bug where file contents were being parsed as well, since v2 converted tool results to text blocks)
+
+			// NOTE: 这是从工具结果中动态加载上下文 mentions 的临时解决方案。它会检查是否存在指示工具被拒绝并提供反馈的标签（参见 formatToolDeniedFeedback、attemptCompletion、executeCommand 和 consecutiveMistakeCount >= 3） 或 “<answer>”（参见 askFollowupQuestion），我们将所有用户生成的内容放在这些标签中，以便它们可以有效地用作何时应该解析提及的标记）。但是，如果我们将来允许多个工具响应，我们将需要专门解析用户内容标签中的提及。
+			// （注意：这会导致 @/ import 别名错误，其中文件内容也被解析，因为 v2 将工具结果转换为文本块）
 			Promise.all(
+				// NOTE: 解析 content 中的每个对象中可能存在的 mentions（@）
 				userContent.map(async (block) => {
 					if (block.type === "text") {
 						// We need to ensure any user generated content is wrapped in one of these tags so that we know to parse mentions
