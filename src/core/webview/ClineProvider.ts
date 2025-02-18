@@ -1286,6 +1286,113 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
+	// Ollama
+	/**
+	 * 获取Ollama模型的列表。
+	 * 
+	 * 该函数通过向指定的Ollama API端点发送请求，获取所有可用的模型名称，并返回去重后的模型名称列表。
+	 * 
+	 * @param {string} [baseUrl] - Ollama API的基础URL。如果未提供，则默认使用 `http://localhost:11434`。
+	 * @returns {Promise<string[]>} 返回一个包含所有去重后的模型名称的数组。如果请求失败或URL无效，则返回空数组。
+	 */
+	async getOllamaModels(baseUrl?: string) {
+		try {
+			if (!baseUrl) {
+				// 如果未提供baseUrl，则使用默认的本地URL
+				baseUrl = "http://localhost:11434"
+			}
+			if (!URL.canParse(baseUrl)) {
+				// 检查URL是否有效，如果无效则返回空数组
+				return []
+			}
+			// 向Ollama API发送请求，获取模型列表
+			const response = await axios.get(`${baseUrl}/api/tags`)
+			const modelsArray = response.data?.models?.map((model: any) => model.name) || []
+			const models = [...new Set<string>(modelsArray)]
+			return models
+		} catch (error) {
+			return []
+		}
+	}
+
+	// LM Studio
+	/**
+	 * 获取LM Studio模型列表。
+	 * 
+	 * 该函数通过向指定的基础URL发送GET请求，获取LM Studio的模型列表，并返回去重后的模型ID数组。
+	 * 如果未提供基础URL，则默认使用`http://localhost:1234`。
+	 * 如果URL无法解析或请求失败，则返回空数组。
+	 * 
+	 * @param {string} [baseUrl] - 可选参数，LM Studio服务的基础URL。如果未提供，则使用默认值`http://localhost:1234`。
+	 * @returns {Promise<string[]>} 返回一个Promise，解析为去重后的模型ID数组。如果请求失败或URL无效，则返回空数组。
+	 */
+	async getLmStudioModels(baseUrl?: string) {
+		try {
+			if (!baseUrl) {
+				baseUrl = "http://localhost:1234"
+			}
+			if (!URL.canParse(baseUrl)) {
+				return []
+			}
+			const response = await axios.get(`${baseUrl}/v1/models`)
+			const modelsArray = response.data?.data?.map((model: any) => model.id) || []
+			const models = [...new Set<string>(modelsArray)]
+			return models
+		} catch (error) {
+			return []
+		}
+	}
+
+	// Auth
+	/**
+	 * 验证授权状态是否有效。
+	 * 
+	 * 在extension.ts中使用到
+	 * 
+	 * 该函数用于验证传入的授权状态 `state` 是否与存储的 `authNonce` 值匹配。
+	 * 如果匹配，则清除存储的 `authNonce` 并返回 `true`，否则返回 `false`。
+	 * 
+	 * @param state - 待验证的授权状态字符串，可能为 `null`。
+	 * @returns 返回一个 `Promise<boolean>`，表示授权状态是否有效。
+	 */
+
+	public async validateAuthState(state: string | null): Promise<boolean> {
+		// 从存储中获取当前的 `authNonce` 值
+		const storedNonce = await this.getSecret("authNonce")
+
+		// 如果传入的 `state` 为空或与存储的 `authNonce` 不匹配，返回 `false`
+		if (!state || state !== storedNonce) {
+			return false
+		}
+		// 验证成功后，清除存储的 `authNonce`，防止重复使用
+		await this.storeSecret("authNonce", undefined) // Clear after use
+		return true
+	}
+
+	/**
+	 * 处理认证回调，使用自定义令牌进行登录并安全存储令牌。
+	 * 该函数通常在从外部认证提供者接收到认证令牌后调用。
+	 * 
+	 * 在extension.ts中使用到
+	 * 
+	 * @param {string} token - 从认证提供者接收到的自定义令牌。
+	 * @returns {Promise<void>} - 无返回值。
+	 */
+	async handleAuthCallback(token: string) {
+		try {
+			// First sign in with Firebase to trigger auth state change
+			await this.authManager.signInWithCustomToken(token)
+
+			// Then store the token securely
+			await this.storeSecret("authToken", token)
+			await this.postStateToWebview()
+			vscode.window.showInformationMessage("Successfully logged in to Cline")
+		} catch (error) {
+			console.error("Failed to handle auth callback:", error)
+			vscode.window.showErrorMessage("Failed to log in to Cline")
+		}
+	}
+
 	// MCP Marketplace
 
 	private async fetchMcpMarketplaceFromApi(silent: boolean = false): Promise<McpMarketplaceCatalog | undefined> {
@@ -1453,113 +1560,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 				type: "mcpDownloadDetails",
 				error: errorMessage,
 			})
-		}
-	}
-
-	// Ollama
-	/**
-	 * 获取Ollama模型的列表。
-	 * 
-	 * 该函数通过向指定的Ollama API端点发送请求，获取所有可用的模型名称，并返回去重后的模型名称列表。
-	 * 
-	 * @param {string} [baseUrl] - Ollama API的基础URL。如果未提供，则默认使用 `http://localhost:11434`。
-	 * @returns {Promise<string[]>} 返回一个包含所有去重后的模型名称的数组。如果请求失败或URL无效，则返回空数组。
-	 */
-	async getOllamaModels(baseUrl?: string) {
-		try {
-			if (!baseUrl) {
-				// 如果未提供baseUrl，则使用默认的本地URL
-				baseUrl = "http://localhost:11434"
-			}
-			if (!URL.canParse(baseUrl)) {
-				// 检查URL是否有效，如果无效则返回空数组
-				return []
-			}
-			// 向Ollama API发送请求，获取模型列表
-			const response = await axios.get(`${baseUrl}/api/tags`)
-			const modelsArray = response.data?.models?.map((model: any) => model.name) || []
-			const models = [...new Set<string>(modelsArray)]
-			return models
-		} catch (error) {
-			return []
-		}
-	}
-
-	// LM Studio
-	/**
-	 * 获取LM Studio模型列表。
-	 * 
-	 * 该函数通过向指定的基础URL发送GET请求，获取LM Studio的模型列表，并返回去重后的模型ID数组。
-	 * 如果未提供基础URL，则默认使用`http://localhost:1234`。
-	 * 如果URL无法解析或请求失败，则返回空数组。
-	 * 
-	 * @param {string} [baseUrl] - 可选参数，LM Studio服务的基础URL。如果未提供，则使用默认值`http://localhost:1234`。
-	 * @returns {Promise<string[]>} 返回一个Promise，解析为去重后的模型ID数组。如果请求失败或URL无效，则返回空数组。
-	 */
-	async getLmStudioModels(baseUrl?: string) {
-		try {
-			if (!baseUrl) {
-				baseUrl = "http://localhost:1234"
-			}
-			if (!URL.canParse(baseUrl)) {
-				return []
-			}
-			const response = await axios.get(`${baseUrl}/v1/models`)
-			const modelsArray = response.data?.data?.map((model: any) => model.id) || []
-			const models = [...new Set<string>(modelsArray)]
-			return models
-		} catch (error) {
-			return []
-		}
-	}
-
-	// Auth
-	/**
-	 * 验证授权状态是否有效。
-	 * 
-	 * 在extension.ts中使用到
-	 * 
-	 * 该函数用于验证传入的授权状态 `state` 是否与存储的 `authNonce` 值匹配。
-	 * 如果匹配，则清除存储的 `authNonce` 并返回 `true`，否则返回 `false`。
-	 * 
-	 * @param state - 待验证的授权状态字符串，可能为 `null`。
-	 * @returns 返回一个 `Promise<boolean>`，表示授权状态是否有效。
-	 */
-
-	public async validateAuthState(state: string | null): Promise<boolean> {
-		// 从存储中获取当前的 `authNonce` 值
-		const storedNonce = await this.getSecret("authNonce")
-
-		// 如果传入的 `state` 为空或与存储的 `authNonce` 不匹配，返回 `false`
-		if (!state || state !== storedNonce) {
-			return false
-		}
-		// 验证成功后，清除存储的 `authNonce`，防止重复使用
-		await this.storeSecret("authNonce", undefined) // Clear after use
-		return true
-	}
-
-	/**
-	 * 处理认证回调，使用自定义令牌进行登录并安全存储令牌。
-	 * 该函数通常在从外部认证提供者接收到认证令牌后调用。
-	 * 
-	 * 在extension.ts中使用到
-	 * 
-	 * @param {string} token - 从认证提供者接收到的自定义令牌。
-	 * @returns {Promise<void>} - 无返回值。
-	 */
-	async handleAuthCallback(token: string) {
-		try {
-			// First sign in with Firebase to trigger auth state change
-			await this.authManager.signInWithCustomToken(token)
-
-			// Then store the token securely
-			await this.storeSecret("authToken", token)
-			await this.postStateToWebview()
-			vscode.window.showInformationMessage("Successfully logged in to Cline")
-		} catch (error) {
-			console.error("Failed to handle auth callback:", error)
-			vscode.window.showErrorMessage("Failed to log in to Cline")
 		}
 	}
 
