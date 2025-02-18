@@ -10,9 +10,9 @@ import { globby } from "globby"
 
 /**
  * Cline 实例的 Checkpoint 管理器，基于 simpleGit 实现。
- * 
+ *
  * 它是 Cline 实例的工具类，作为 Cline 实例的一个属性，用于管理 Checkpoint 的创建、提交、重置等操作。
- * 
+ *
  * 路径为 [context.globalStorageUri.fsPath]/tasks/[taskId]/checkpoints/.git
  * @docs simpleGit https://www.npmjs.com/package/simple-git
  */
@@ -36,7 +36,7 @@ class CheckpointTracker {
 	 * 创建 CheckpointTracker 实例
 	 * @param taskId CheckpointTracker 所属的 Cline 实例绑定的任务 id
 	 * @param provider 引用的 ClineProvider 实例
-	 * @returns 
+	 * @returns
 	 */
 	public static async create(taskId: string, provider?: ClineProvider): Promise<CheckpointTracker | undefined> {
 		try {
@@ -419,11 +419,11 @@ class CheckpointTracker {
 	}
 	/**
 	 * 重命名嵌套的 Git 仓库目录以启用或禁用。
-	 * 
+	 *
 	 * 使用 Git 跟踪检查点时，需要临时禁用嵌套的 Git 仓库
-	 * 
+	 *
 	 * @param disable - 如果为 true，则禁用嵌套的 Git 仓库；如果为 false，则重新启用它们。
-	 */	
+	 */
 	private async renameNestedGitRepos(disable: boolean) {
 		// Find all .git directories that are not at the root level
 		const gitPaths = await globby("**/.git" + (disable ? "" : GIT_DISABLED_SUFFIX), {

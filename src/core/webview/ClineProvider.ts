@@ -104,13 +104,13 @@ type GlobalStateKey =
 	| "togetherModelId"
 	| "mcpMarketplaceCatalog"
 
-/** 
+/**
  * Cline 的全局文件名
  * 1. 在 Windows 上，`context.globalStorageUri.fsPath` 为：
  * `C:\Users\<你的用户名>\AppData\Roaming\Code\User\globalStorage\<发布者名称>.<扩展名>`
  * 2. 在 Linux 上，`context.globalStorageUri.fsPath` 为：
  * `/home/<你的用户名>/.config/Code/User/globalStorage/<发布者名称>.<扩展名>`
- * 
+ *
  * Cline 的<发布者名称>.<扩展名> 为 saoudrizwan.claude-dev
  */
 export const GlobalFileNames = {
@@ -130,9 +130,9 @@ export const GlobalFileNames = {
  * 1. 创建插件的 Webview 视图。
  * 2. 管理 Cline 实例的状态（只会存在一个）
  * 3. 维护 Cline 与 Webview 之间的通信。
- * 
+ *
  * 在插件启动时创建一个 ClineProvider 实例，并在插件关闭时销毁该实例。
- * 
+ *
  * 通过 ClineProvider 实例，可以用两种方式创建一个 Cline 实例作为其私有属性，用于处理用户的任务请求。
  */
 export class ClineProvider implements vscode.WebviewViewProvider {
@@ -184,15 +184,15 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	- https://github.com/microsoft/vscode-extension-samples/blob/main/webview-sample/src/extension.ts
 	*/
 	/**
- 	 * 释放资源，当用户或系统关闭侧边栏/编辑器标签时调用。
- 	 * VSCode 扩展使用可处置模式来清理资源，确保在不再需要时及时释放资源，防止内存泄漏并确保扩展正常运行。
- 	 * 此方法会释放各种资源和事件监听器。
- 	 */
+	 * 释放资源，当用户或系统关闭侧边栏/编辑器标签时调用。
+	 * VSCode 扩展使用可处置模式来清理资源，确保在不再需要时及时释放资源，防止内存泄漏并确保扩展正常运行。
+	 * 此方法会释放各种资源和事件监听器。
+	 */
 	async dispose() {
 		// 记录开始释放 ClineProvider 的日志
 		this.outputChannel.appendLine("Disposing ClineProvider...")
 
-		 // 清除任务并记录日志 调用 clearTask 方法
+		// 清除任务并记录日志 调用 clearTask 方法
 		await this.clearTask()
 		this.outputChannel.appendLine("Cleared task")
 
@@ -247,12 +247,12 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	}
 	/**
 	 * 以 "userInfo" 为 key，设置并更新全局状态的用户信息。
-	 * 
+	 *
 	 * 该函数接收一个可选的用户信息对象，并将其更新到全局状态中。用户信息对象包含以下可选属性：
 	 * - displayName: 用户的显示名称，类型为字符串或null。
 	 * - email: 用户的电子邮件地址，类型为字符串或null。
 	 * - photoURL: 用户的头像URL，类型为字符串或null。
-	 * 
+	 *
 	 * @param info - 可选参数，包含用户信息的对象。如果未提供，则全局状态中的用户信息将被更新为undefined。
 	 */
 	async setUserInfo(info?: { displayName: string | null; email: string | null; photoURL: string | null }) {
@@ -271,7 +271,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	/**
 	 * 【主线】解析和配置 VSCode 的 Webview 视图。
 	 * 主要功能包括：设置 Webview 的选项和 HTML 内容、监听消息、处理视图可见性变化、监听视图关闭事件、监听主题颜色变化、清除任务状态。
-	 * @param webviewView 
+	 * @param webviewView
 	 */
 	resolveWebviewView(
 		// 表示一个 Webview 视图或面板
@@ -376,8 +376,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	 * @param {string[]} [images] - 与任务相关的图片数组。这是一个可选参数，如果未提供，则不设置图片。
 	 */
 	async initClineWithTask(task?: string, images?: string[]) {
-
-		 // 清除现有任务，确保在启动新任务之前没有任务存在
+		// 清除现有任务，确保在启动新任务之前没有任务存在
 		await this.clearTask() // ensures that an existing task doesn't exist before starting a new one, although this shouldn't be possible since user must clear task before starting a new one
 		// 获取当前状态，包括 API 配置、自定义指令、自动批准设置、浏览器设置和聊天设置
 		const { apiConfiguration, customInstructions, autoApprovalSettings, browserSettings, chatSettings } =
@@ -404,7 +403,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		await this.clearTask()
 		const { apiConfiguration, customInstructions, autoApprovalSettings, browserSettings, chatSettings } =
 			await this.getState()
-		
+
 		// 使用获取的配置和设置以及传入的历史项初始化一个新的 Cline 实例。
 		this.cline = new Cline(
 			this,
@@ -422,7 +421,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	// Send any JSON serializable data to the react app
 	/**
 	 * 向与当前视图关联的 Webview 发送一个可序列化为 JSON 的消息。
-	 * 1. 前端需要监听 "message" 事件 
+	 * 1. 前端需要监听 "message" 事件
 	 * 2. 消息是异步发送的，确保不会阻塞主线程。
 	 * @param message 要发送的消息，必须是一个可序列化为 JSON 的对象。
 	 * @returns 返回一个 Promise，表示消息发送的异步操作。
@@ -434,7 +433,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	/**
 	 * NOTE: 定义并返回应该在插件的 webview 面板中渲染的 HTML 内容。
 	 * 创建对 React Webview 构建文件的引用，并将其插入到 Webview 的 HTML 中。
-	 * 
+	 *
 	 * Defines and returns the HTML that should be rendered within the webview panel.
 	 *
 	 * @remarks This is also the place where references to the React webview build files
@@ -452,7 +451,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		// The CSS file from the React build output
 		// 获取在 Webview 中运行的主脚本的本地路径，并将其转换为可在 Webview 中使用的 URI。
 
-    	// 从 React 构建输出中获取 CSS 文件
+		// 从 React 构建输出中获取 CSS 文件
 		const stylesUri = getUri(webview, this.context.extensionUri, ["webview-ui", "build", "static", "css", "main.css"])
 		// The JS file from the React build output
 		// 从 React 构建输出中获取 JS 文件
@@ -463,8 +462,8 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		// we installed this package in the extension so that we can access it how its intended from the extension (the font file is likely bundled in vscode), and we just import the css fileinto our react app we don't have access to it
 		// don't forget to add font-src ${webview.cspSource};
 		// 从 React 构建输出中获取 Codicon 字体
-    	// 我们已在扩展中安装此包，以便从扩展中访问它（字体文件可能已捆绑在 VSCode 中），
-    	// 我们只需将 CSS 文件导入到 React 应用中即可
+		// 我们已在扩展中安装此包，以便从扩展中访问它（字体文件可能已捆绑在 VSCode 中），
+		// 我们只需将 CSS 文件导入到 React 应用中即可
 		const codiconsUri = getUri(webview, this.context.extensionUri, [
 			"node_modules",
 			"@vscode",
@@ -492,7 +491,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 
         in meta tag we add nonce attribute: A cryptographic nonce (only used once) to allow scripts. The server must generate a unique nonce value each time it transmits a policy. It is critical to provide a nonce that cannot be guessed as bypassing a resource's policy is otherwise trivial.
         */
-	   // 使用 nonce 来限制只允许运行特定的脚本
+		// 使用 nonce 来限制只允许运行特定的脚本
 		const nonce = getNonce()
 
 		// Tip: Install the es6-string-html VS Code extension to enable code highlighting below
@@ -521,7 +520,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	/**
 	 * 【主线】设置一个事件侦听器来侦听从 webview 上下文传递的消息，并根据收到的消息执行代码。
 	 * 其实就是把 `webview.onDidReceiveMessage()` 封装了一层
-	 * 
+	 *
 	 * Sets up an event listener to listen for messages passed from the webview context and
 	 * executes code based on the message that is received.
 	 *
@@ -1210,17 +1209,17 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 
 	/**
 	 * 获取当前用户的文档目录路径。 只在MCP中用到
-	 * 
+	 *
 	 * 该函数根据操作系统的不同，返回用户的文档目录路径。在Windows系统上，它会尝试通过PowerShell命令获取
 	 * 准确的文档路径。如果获取失败，则回退到默认的 `~/Documents` 路径。在POSIX系统（如macOS、Linux等）
 	 * 上，默认返回 `~/Documents` 路径。
-	 * 
+	 *
 	 * @returns {Promise<string>} 返回一个Promise，解析为用户文档目录的路径。
 	 */
 	async getDocumentsPath(): Promise<string> {
 		if (process.platform === "win32") {
 			// If the user is running Win 7/Win Server 2008 r2+, we want to get the correct path to their Documents directory.
-			
+
 			// 在Windows系统上，尝试通过PowerShell命令获取文档路径
 			try {
 				const { stdout: docsPath } = await execa("powershell", [
@@ -1272,7 +1271,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	/**
 	 * 获取VS Code语言模型（LM）的聊天模型列表。
 	 * 该函数会尝试从VS Code的API中获取可用的聊天模型，如果获取失败则返回空数组。
-	 * 
+	 *
 	 * @returns {Promise<Array>} 返回一个Promise，解析为聊天模型的数组。如果获取失败或没有模型，则返回空数组。
 	 */
 	private async getVsCodeLmModels() {
@@ -1289,9 +1288,9 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	// Ollama
 	/**
 	 * 获取Ollama模型的列表。
-	 * 
+	 *
 	 * 该函数通过向指定的Ollama API端点发送请求，获取所有可用的模型名称，并返回去重后的模型名称列表。
-	 * 
+	 *
 	 * @param {string} [baseUrl] - Ollama API的基础URL。如果未提供，则默认使用 `http://localhost:11434`。
 	 * @returns {Promise<string[]>} 返回一个包含所有去重后的模型名称的数组。如果请求失败或URL无效，则返回空数组。
 	 */
@@ -1318,11 +1317,11 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	// LM Studio
 	/**
 	 * 获取LM Studio模型列表。
-	 * 
+	 *
 	 * 该函数通过向指定的基础URL发送GET请求，获取LM Studio的模型列表，并返回去重后的模型ID数组。
 	 * 如果未提供基础URL，则默认使用`http://localhost:1234`。
 	 * 如果URL无法解析或请求失败，则返回空数组。
-	 * 
+	 *
 	 * @param {string} [baseUrl] - 可选参数，LM Studio服务的基础URL。如果未提供，则使用默认值`http://localhost:1234`。
 	 * @returns {Promise<string[]>} 返回一个Promise，解析为去重后的模型ID数组。如果请求失败或URL无效，则返回空数组。
 	 */
@@ -1346,12 +1345,12 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	// Auth
 	/**
 	 * 验证授权状态是否有效。
-	 * 
+	 *
 	 * 在extension.ts中使用到
-	 * 
+	 *
 	 * 该函数用于验证传入的授权状态 `state` 是否与存储的 `authNonce` 值匹配。
 	 * 如果匹配，则清除存储的 `authNonce` 并返回 `true`，否则返回 `false`。
-	 * 
+	 *
 	 * @param state - 待验证的授权状态字符串，可能为 `null`。
 	 * @returns 返回一个 `Promise<boolean>`，表示授权状态是否有效。
 	 */
@@ -1372,9 +1371,9 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	/**
 	 * 处理认证回调，使用自定义令牌进行登录并安全存储令牌。
 	 * 该函数通常在从外部认证提供者接收到认证令牌后调用。
-	 * 
+	 *
 	 * 在extension.ts中使用到
-	 * 
+	 *
 	 * @param {string} token - 从认证提供者接收到的自定义令牌。
 	 * @returns {Promise<void>} - 无返回值。
 	 */
@@ -1567,9 +1566,9 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	/**
 	 * 获取 OpenAI 模型列表。
 	 * 该函数通过调用指定的 API 地址获取可用的 OpenAI 模型列表，并返回去重后的模型 ID 数组。
-	 * 
+	 *
 	 * 在私有方法 setWebviewMessageListener 中用到
-	 * 
+	 *
 	 * @param {string} [baseUrl] - OpenAI API 的基础地址，如果未提供则返回空数组。
 	 * @param {string} [apiKey] - OpenAI API 的密钥，用于授权请求，如果未提供则使用无授权的请求。
 	 * @returns {Promise<string[]>} - 返回去重后的模型 ID 数组，如果请求失败或参数无效则返回空数组。
@@ -1602,9 +1601,9 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	/**
 	 * 处理 OpenRouter 的回调，通过授权码获取 API 密钥并更新相关配置。
 	 * 该函数通常用于在用户完成 OpenRouter 授权后，获取 API 密钥并更新全局状态。
-	 * 
+	 *
 	 * 在extension.ts中使用到
-	 * 
+	 *
 	 * @param {string} code - OpenRouter 授权码，用于交换 API 密钥。
 	 */
 	async handleOpenRouterCallback(code: string) {
@@ -1637,9 +1636,9 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	}
 	/**
 	 * 确保缓存目录存在，如果不存在则创建它。
-	 * 
+	 *
 	 * 该函数会检查并创建缓存目录，确保后续操作可以安全地进行文件存储。
-	 * 
+	 *
 	 * 在下边两个 readOpenRouterModels 和 refreshOpenRouterModels 中用到
 	 * @returns {Promise<string>} 返回缓存目录的绝对路径。
 	 */
@@ -1651,12 +1650,12 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	}
 	/**
 	 * 读取 OpenRouter 模型信息文件并解析为对象。
-	 * 
+	 *
 	 * 该函数首先确保缓存目录存在，然后检查 OpenRouter 模型信息文件是否存在。
 	 * 如果文件存在，读取文件内容并将其解析为 JSON 对象返回；如果文件不存在，返回 undefined。
-	 * 
+	 *
 	 * 在 setWebviewMessageListener 中用到
-	 * 
+	 *
 	 * @returns {Promise<Record<string, ModelInfo> | undefined>} 返回一个 Promise，解析为包含模型信息的对象，如果文件不存在则返回 undefined。
 	 */
 	async readOpenRouterModels(): Promise<Record<string, ModelInfo> | undefined> {
@@ -1675,9 +1674,9 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	 * 刷新并获取OpenRouter的模型信息。
 	 * 该函数会从OpenRouter的API获取最新的模型数据，并将其保存到本地缓存文件中。
 	 * 同时，它会将获取到的模型信息发送到Webview中。
-	 * 
+	 *
 	 * 在 setWebviewMessageListener 中关键字 refreshOpenRouterModels 下用到
-	 * 
+	 *
 	 * @returns {Promise<Record<string, ModelInfo>>} 返回一个包含所有模型信息的对象，键为模型ID，值为模型信息。
 	 */
 	async refreshOpenRouterModels() {
@@ -1801,17 +1800,17 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	// Task history
 	/**
 	 * 根据任务ID获取任务相关的详细信息。
-	 * 
+	 *
 	 * 该函数会从全局状态中获取任务历史记录，并根据提供的任务ID查找对应的任务项。
 	 * 如果找到任务项，会进一步获取任务目录路径、API对话历史文件路径、UI消息文件路径，
 	 * 并读取API对话历史文件内容。如果任务不存在，则从状态中删除该任务ID并抛出错误。
-	 * 
+	 *
 	 * 在 Cline.ts 中的 recursivelyMakeClineRequests 用到
 	 * 在本文件中 showTaskWithId exportTaskWithId deleteTaskWithId cancelTask 用到
-	 * 
+	 *
 	 * @param id - 任务的唯一标识符。
 	 * @returns 返回一个Promise，解析为一个包含任务历史项、任务目录路径、API对话历史文件路径、
-	*          UI消息文件路径以及API对话历史记录的对象。
+	 *          UI消息文件路径以及API对话历史记录的对象。
 	 * @throws 如果任务未找到，抛出错误 "Task not found"。
 	 */
 	async getTaskWithId(id: string): Promise<{
@@ -1853,7 +1852,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	 * 如果任务ID与当前任务ID不同，则获取该任务的历史记录并初始化客户端。
 	 * 最后，向Webview发送消息以触发聊天按钮点击事件。
 	 * 在 setWebviewMessageToWebview 中调用
-	 * 
+	 *
 	 * WebviewMessage.ts中也定义了相应关键字
 	 * @param id - 要显示的任务的唯一标识符。
 	 */
@@ -1874,10 +1873,10 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 
 	/**
 	 * 根据任务ID导出任务数据
-	 * 
+	 *
 	 * 该函数首先通过任务ID获取任务的历史记录和API对话历史，然后调用下载函数将任务数据导出。
 	 * 在 setWebviewMessageToWebview 中调用
-	 * 
+	 *
 	 * WebviewMessage.ts中也定义了相应关键字
 	 * @param id - 任务的唯一标识符，用于查找对应的任务数据
 	 */
@@ -1890,11 +1889,11 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	/**
 	 * 根据任务ID删除任务及其相关文件。
 	 * 在 setWebviewMessageToWebview 中调用
-	 * 
+	 *
 	 * WebviewMessage.ts中也定义了相应关键字
-	 * 
+	 *
 	 * @param id - 要删除的任务的唯一标识符。
-     * @returns Promise<void> - 该函数不返回任何值，但会异步执行删除操作。
+	 * @returns Promise<void> - 该函数不返回任何值，但会异步执行删除操作。
 	 */
 	async deleteTaskWithId(id: string) {
 		// 如果当前任务ID与传入的ID匹配，则清除当前任务
@@ -1958,7 +1957,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	 * 将当前状态发送到 Webview。
 	 * 该函数首先获取需要发送到 Webview 的状态，然后通过 `postMessageToWebview` 方法将状态信息发送出去。
 	 * 状态信息包含一个类型字段 "state"，以及实际的状态数据。
-	 * 
+	 *
 	 * @returns {Promise<void>} 该函数返回一个 Promise，在状态成功发送后解析。
 	 */
 	async postStateToWebview() {
@@ -1967,13 +1966,13 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	}
 	/**
 	 * 获取当前扩展的状态信息，并将其格式化为适合发送到 Webview 的数据结构。
-	 * 
+	 *
 	 * 该函数从 `getState` 方法中获取当前扩展的配置和用户信息，并将其与一些运行时状态（如当前任务、错误消息等）组合，
 	 * 最终返回一个包含所有必要信息的 `ExtensionState` 对象。
-	 * 
+	 *
 	 * 只在 postStateToWebview 中用到一次
 	 * @returns {Promise<ExtensionState>} 返回一个 Promise，解析为包含扩展状态信息的 `ExtensionState` 对象。
-	 * 
+	 *
 	 */
 	async getStateToPostToWebview(): Promise<ExtensionState> {
 		const {
@@ -2008,7 +2007,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	}
 	/**
 	 * 异步清除任务。
-	 * 
+	 *
 	 * 该方法用于中止当前任务并清除对任务对象的引用。
 	 * 首先调用 cline 对象的 abortTask 方法来中止正在进行的任务（如果存在）。
 	 * 然后，清除对 cline 对象的引用，以便在所有 Promise 结束后可以被垃圾回收。
@@ -2016,7 +2015,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	async clearTask() {
 		// abortTask为Cline.ts的实例方法，用于中止正在进行的任务。
 		/**首先将 abort 标志设置为 true，以停止任何自主运行的 Promise。
- 		 * 然后调用 terminalManager 的 disposeAll 方法释放所有终端资源。
+		 * 然后调用 terminalManager 的 disposeAll 方法释放所有终端资源。
 		 * 接着调用 urlContentFetcher 的 closeBrowser 方法关闭浏览器。
 		 * 然后调用 browserSession 的 closeBrowser 方法关闭浏览器会话。
 		 * 接着调用 clineIgnoreController 的 dispose 方法释放忽略控制器资源。
@@ -2073,10 +2072,10 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	*/
 	/**
 	 * 获取应用程序的全局状态和配置信息。
-	 * 
+	 *
 	 * 该函数通过异步方式从全局状态和密钥存储中获取多个配置项，包括API提供者、模型ID、API密钥、AWS配置、OpenAI配置等。
 	 * 它还处理了一些默认值和逻辑，例如为新用户或旧用户设置默认的API提供者。
-	 * 
+	 *
 	 * @returns {Promise<Object>} 返回一个包含所有配置和状态信息的对象，包括API配置、用户信息、任务历史、浏览器设置等。
 	 */
 	async getState() {
@@ -2285,7 +2284,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	// global
 	/**
 	 * 更新全局状态中指定键的值。
-	 * 
+	 *
 	 * @param key - 全局状态中的键，类型为 `GlobalStateKey`。
 	 * @param value - 要更新的值，类型为 `any`。
 	 */
@@ -2294,7 +2293,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	}
 	/**
 	 * 获取全局状态中指定键的值。
-	 * 
+	 *
 	 * @param key - 全局状态中的键，类型为 `GlobalStateKey`。
 	 * @returns 返回与指定键关联的值，类型为 `any`。
 	 */
@@ -2305,7 +2304,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	// workspace
 	/**
 	 * 更新工作区状态中指定键的值。
-	 * 
+	 *
 	 * @param key - 工作区状态中的键，类型为 `string`。
 	 * @param value - 要更新的值，类型为 `any`。
 	 */
@@ -2314,7 +2313,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	}
 	/**
 	 * 获取工作区状态中指定键的值。
-	 * 
+	 *
 	 * @param key - 工作区状态中的键，类型为 `string`。
 	 * @returns 返回与指定键关联的值，类型为 `any`。
 	 */

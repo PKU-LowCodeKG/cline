@@ -70,9 +70,9 @@ type UserContent = Array<
 
 /**
  * Cline 类是 ClineProvider 的核心类。
- * 
+ *
  * 对于用户的一个新任务或者历史任务，在 ClineProvider 中创建一个 Cline 实例处理，一个 Cline 实例只负责处理一个任务，由 taskId 标识。
- * 
+ *
  * Cline 实例的生命周期是：开始新任务/恢复并继续旧任务（创建 Cline 实例）-> 中断废弃当前任务（废弃 Cline 实例）
  */
 export class Cline {
@@ -198,7 +198,7 @@ export class Cline {
 	// 3. ApiHandler 接口由各种 LLM 实现，在 `createMessage` 方法中，将 Anthropic.MessageParam[] 形式转为符合自己的格式
 	//    - 其中 ConvertToO1Messages 和 ConvertToOpenAiMessages 转换方法比较常用
 	//    - 此外，只实现了 Gemini O1 openai 格式同 anthropic.message 相互转换的方法，但是在实际代码中并未调用这几个方法
-	// 4. 对于 LLM response，根据 `attemptApiRequest` 函数，Cline 会将 LLM response 转为 Anthropic.MessageParam[] 形式，存入 LLM API 对话历史（ApiConversationHistory 的维护） 
+	// 4. 对于 LLM response，根据 `attemptApiRequest` 函数，Cline 会将 LLM response 转为 Anthropic.MessageParam[] 形式，存入 LLM API 对话历史（ApiConversationHistory 的维护）
 
 	/** 从 api_conversation_history.json 读取当前任务的 LLM API 对话历史数组 */
 	private async getSavedApiConversationHistory(): Promise<Anthropic.MessageParam[]> {
@@ -271,7 +271,7 @@ export class Cline {
 
 	/**
 	 * 【主线】【Cline Message】更新当前 Cline 实例 绑定的 任务的 时间戳、API 消耗指标等
-	 * 
+	 *
 	 * 因 Cline Message 数组的变动而对任务历史 HistoryItem 进行更新
 	 */
 	private async saveClineMessages() {
@@ -319,7 +319,7 @@ export class Cline {
 	// #region Checkpoint 的恢复和保存，用于实现 diff 功能
 	/**
 	 * 恢复到指定的时间点。
-	 * 
+	 *
 	 * 该函数根据提供的消息时间戳查找对应的消息，并根据指定的恢复类型执行恢复操作。
 	 * ClineProvider 中 监听到"checkpointRestore" 使用
 	 * @param messageTs - 要恢复到的消息的时间戳。
@@ -557,7 +557,7 @@ export class Cline {
 	}
 	/**
 	 * 异步检查最新的任务完成是否包含与上次完成相比的新更改。
-	 * 
+	 *
 	 * @returns {Promise<boolean>} - 如果有新的更改返回 `true`，否则返回 `false`。
 	 */
 	async doesLatestTaskCompletionHaveNewChanges() {
@@ -613,11 +613,11 @@ export class Cline {
 	 * 【主线】
 	 * Cline ask 用于向用户询问，在前端一般表现为 Cline wants to do sth (edit this file, execute this command, etc.)
 	 * 在向用户询问后，使用 pWaitFor 库等待用户答复
-	 * 
+	 *
 	 * Cline askResponse 是用户在前端对 Cline ask 的回应：“接受”按钮、“拒绝”按钮、还是文本框输入答复。
 	 * 无论是哪一种，都是通过 `vscode.postMessage()` 给后端传递 "askResponse" 类型消息，再由 ClineProvider 定义的 onDidReceiveMessage 处理。
 	 * 由 `handleWebviewAskResponse()` 函数设置 Cline 实例的 askResponse 3 个属性。
-	 * 
+	 *
 	 * partial 变量有三个有效的状态：
 	 *    - true：表示当前是一个部分消息，即这条消息还没有完整接收或处理，只有部分内容。【被截断的消息的一部分】
 	 *    - false：表示这条消息已经完成，即消息的内容已经完整地接收或处理完毕。【被截断的消息的所有部分拼合完整】
@@ -1172,12 +1172,12 @@ export class Cline {
 
 	/**
 	 * 【主线】初始化任务循环，对 userContent 进行递归处理
-	 * 
+	 *
 	 * 任务的完成和 "attempt_completion" 工具的调用相关：
 	 * 1. 任务分配与工具调用：Cline 接受任务，并通过调用不同的工具来完成该任务。如果任务没有被标记为已完成（即没有调用 attempt_completion 工具），系统会继续将工具的响应反馈给 Cline，直到他调用 attempt_completion 或不再使用工具。
 	 * 2. 任务完成检查：如果 Cline 在一段时间内没有再调用工具，系统会提示他检查任务是否完成，并建议他调用 attempt_completion 来结束任务。如果他继续使用工具，系统会继续执行任务。
 	 * 3. 最大请求限制：为了防止无限循环的请求，系统对每个任务有 MAX_REQUESTS_PER_TASK 的限制。如果 Cline 的请求达到上限，系统会强制他完成任务。
-	 * 
+	 *
 	 * 当执行 `abortTask()` 时，this.abort 被设置为 true
 	 * 1. `recursivelyMakeClineRequests()` 会打破递归，返回 true。终止 while 循环。
 	 * 2. while 循环也会因为 this.abort 被设置为 true 而结束。
@@ -1221,11 +1221,11 @@ export class Cline {
 
 	/**
 	 * 【主线】中断（废弃） Cline 实例绑定的当前任务。
-	 * 
+	 *
 	 * 该函数是唯一修改 this.abort 的地方。因此 说是“中断”，实际上是彻底废弃了当前任务。
 	 * 此外，所有 `abortTask()` 的地方，紧跟着 `this.cline = undefined`，即 Cline 实例被废弃。
 	 * 因此，Cline 实例会在 废弃其绑定的任务后 被垃圾回收。
-	 * 
+	 *
 	 * 1. 将 abort 标志设置为 true，以停止任何自主运行的 Promise。
 	 * 2. 调用工具类， 释放所有终端资源、关闭浏览器、关闭浏览器会话、释放忽略控制器资源。
 	 * 3. 最后等待 diffViewProvider 的 revertChanges 方法完成，确保目录和文件在重新启动任务之前已恢复到检查点状态。
@@ -1243,10 +1243,10 @@ export class Cline {
 	// Checkpoints
 	/**
 	 * 保存检查点的异步方法。
-	 * 
+	 *
 	 * 此方法会尝试提交一个检查点，并根据不同情况更新聊天消息中的检查点信息。
 	 * @param {boolean} [isAttemptCompletionMessage=false] - 指示是否将当前操作视为尝试完成消息的操作。
-	 *                                                    
+	 *
 	 */
 	async saveCheckpoint(isAttemptCompletionMessage: boolean = false) {
 		const commitHash = await this.checkpointTracker?.commit() // silently fails for now
@@ -1431,7 +1431,7 @@ export class Cline {
 
 	/**
 	 * 【主线】该函数是一个异步生成器函数，非常适合处理需要逐步获取的 API 数据流
-	 * 
+	 *
 	 * 【核心交互】以 ApiStreamChunk 形式（"text"、"reasoning"、"usage" 三种类型）流式返回 LLM 的回复结果
 	 * 1. 读取工具支持配置（MCP、Claude Computer Use）
 	 * 2. 结合 cwd、模型对工具支持情况、MCP Hub 和浏览器设置等信息 生成 `SYSTEM PROMPT`
@@ -1441,8 +1441,8 @@ export class Cline {
 	 * 4. 如果之前的 API 请求的 token 使用量接近上下文窗口的最大值，则截断 LLM API 对话历史记录
 	 * 5. `SYSTEM PROMPT` + `User Instructions` + 截断后的 LLM API 对话历史记录，提供给模型
 	 * 6. 获取返回的流并创建异步迭代器。处理 API 请求和重试
-	 * @param previousApiReqIndex 
-	 * @returns 
+	 * @param previousApiReqIndex
+	 * @returns
 	 */
 	async *attemptApiRequest(previousApiReqIndex: number): ApiStream {
 		// Wait for MCP servers to be connected before generating system prompt
@@ -1741,7 +1741,7 @@ export class Cline {
 					break
 				}
 
-				/** 
+				/**
 				 * 将工具调用的描述、工具调用的结果 2 条 Cline Message 添加到 userMessageContent 中，并设置 didAlreadyUseTool 为 true，以防止在同一消息中使用多个工具。
 				 * @param content 工具的结果
 				 */
@@ -3179,7 +3179,7 @@ export class Cline {
 
 	/**
 	 * 【主线】递归地发出 Cline 请求
-	 * 
+	 *
 	 * includeFileDetails 是否包括当前工作目录下的文件列表。
 	 * 只在最开始的时候（while 的第一次循环，本函数的第一层递归）为 true
 	 * @returns 是否继续循环的 bool，用于终止父循环
@@ -3241,7 +3241,7 @@ export class Cline {
 		}
 
 		// get previous api req's index to check token usage and determine if we need to truncate conversation history
-		/** 获取上一个 api_req_started 在 ClineMessage 数组中的索引，以检查 token 使用情况并确定是否需要截断对话历史记录 */ 
+		/** 获取上一个 api_req_started 在 ClineMessage 数组中的索引，以检查 token 使用情况并确定是否需要截断对话历史记录 */
 		const previousApiReqIndex = findLastIndex(this.clineMessages, (m) => m.say === "api_req_started")
 
 		// Save checkpoint if this is the first API request

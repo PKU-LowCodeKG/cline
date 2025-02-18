@@ -42,7 +42,7 @@ const AutoApproveSchema = z.array(z.string()).default([])
 // StdioServerParameters
 /**
  * Cline 定义的 StdioClientTransport 配置对象范式
- * 
+ *
  * 官方的接口是 StdioServerParameters，Cline 自定义了这个 数据结构范式，
  * 用 safeParse 解析 StdioServerParameters 是否符合这个预期的数据结构（可选字段可以没有）
  */
@@ -58,10 +58,10 @@ const StdioConfigSchema = z.object({
  * 多个 MCP 服务器的信息，形如
  * {
  * 	mcpServers: {
- * 		string1(服务器名称): StdioConfigSchema1, 
+ * 		string1(服务器名称): StdioConfigSchema1,
  * 		...
  * 	}
- * } 
+ * }
  */
 const McpSettingsSchema = z.object({
 	/** 键是服务器名称，值是 StdioConfigSchema */
@@ -74,7 +74,7 @@ const McpSettingsSchema = z.object({
  *    - 创建 MCP 服务器，服务器可以暴露资源（server.resource）、提示（prompt）和工具（tool），以便客户端使用。
  *    - 创建 MCP 客户端，客户端能够连接到任何符合 MCP 规范的服务器。
  * TypeScript 形式的 MCP 服务器需要连接（connect）到传输（transport）以与客户端通信。Cline 选择了 stdio 传输（StdioClientTransport）。
- * 
+ *
  * Model Context Protocol（MCP）是一个用于在应用程序和 LLM 之间提供上下文的标准化协议。它旨在将上下文提供与实际的 LLM 交互分离，从而简化开发流程并提高灵活性。
  * @docs https://modelcontextprotocol.io/introduction
  * @server https://github.com/modelcontextprotocol/servers
@@ -118,7 +118,7 @@ export class McpHub {
 		return mcpServersPath
 	}
 
-	/** 
+	/**
 	 * 返回存放 Cline 的 MCP 设置文件的路径。
 	 * `[context.globalStorageUri.fsPath]/settings/cline_mcp_settings.json`
 	 * 如果该路径不存在，创建一个新的 MCP 设置文件。并设置 "mcpServers" 字段为空对象。
@@ -402,9 +402,9 @@ export class McpHub {
 		}
 	}
 
-	/** 
+	/**
 	 * 断开已经存在的服务器的连接
-	 * 
+	 *
 	 * 具体来说，清除服务器名称等于 参数 name 的 连接对象，关闭其 client 和 transport
 	 */
 	async deleteConnection(name: string): Promise<void> {

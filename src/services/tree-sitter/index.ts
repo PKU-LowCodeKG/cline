@@ -8,7 +8,7 @@ import { ClineIgnoreController } from "../../core/ignore/ClineIgnoreController"
 // TODO: implement caching behavior to avoid having to keep analyzing project for new tasks.
 /**
  * 按照 .clineIgnore 忽略文件的前提下，最多解析 50 个 dirPath 路径下的 “代码类型文件”，返回代码文件的 AST 字符串
- * 
+ *
  * 目前只在 Cline 类的 `presentAssistantMessage()` 中被使用一次
  * @param dirPath 要进行解析的目录路径
  * @param clineIgnoreController Cline 的忽略文件控制器
