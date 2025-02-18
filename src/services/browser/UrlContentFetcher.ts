@@ -1,8 +1,5 @@
-// 导入VS Code扩展API，用于与VS Code编辑器进行交互
 import * as vscode from "vscode"
-// 导入Node.js的fs/promises模块，用于进行文件系统的异步操作
 import * as fs from "fs/promises"
-// 导入Node.js的path模块，用于处理和转换文件路径
 import * as path from "path"
 // 从puppeteer-core库中导入Browser、Page和launch，用于控制浏览器进行网页操作
 import { Browser, Page, launch } from "puppeteer-core"
@@ -12,18 +9,24 @@ import * as cheerio from "cheerio"
 import TurndownService from "turndown"
 // @ts-ignore 注释用于忽略TypeScript编译器的类型检查错误，因为这里的模块可能没有类型定义文件
 import PCR from "puppeteer-chromium-resolver"
-// 从自定义的工具模块中导入fileExistsAtPath函数，用于检查文件是否存在
 import { fileExistsAtPath } from "../../utils/fs"
 
-// 定义一个接口PCRStats，用于描述puppeteer-chromium-resolver返回的统计信息结构
+/** Cline 定义接口，用于描述 puppeteer-chromium-resolver 返回的统计信息结构 */
 interface PCRStats {
-	// puppeteer对象，包含launch方法，用于启动浏览器
+	/** puppeteer对象，包含launch方法，用于启动浏览器 */
 	puppeteer: { launch: typeof launch }
-	// 浏览器可执行文件的路径
+	/** 检测到（或者下载好）的 浏览器可执行文件 的路径 */
 	executablePath: string
 }
 
-// 定义一个UrlContentFetcher类，用于从指定URL获取网页内容并转换为Markdown格式
+/**
+ * Cline 实例的工具类之一，用于 **从指定 URL 获取网页内容并转换为 Markdown 格式**。
+ *
+ * 在 Cline 实例的构造函数中，会初始化一个 UrlContentFetcher 实例作为 Cline 实例的属性。
+ * @docs puppeteer-core库（提供 API 控制 Chrome 或 Firefox 进行网页操作） https://www.npmjs.com/package/puppeteer-core
+ * @docs cheerio库（在浏览器端和服务器端均可以 解析和操作 HTML） https://www.npmjs.com/package/cheerio
+ * @docs puppeteer-chromium-resolver库（检测并下载 Chromium） https://www.npmjs.com/package/puppeteer-chromium-resolver
+ */
 export class UrlContentFetcher {
 	// 存储VS Code扩展的上下文信息，包含全局存储路径等信息
 	private context: vscode.ExtensionContext
@@ -37,40 +40,42 @@ export class UrlContentFetcher {
 		this.context = context
 	}
 
-	// 私有异步方法，用于确保Chromium浏览器存在，如果不存在则下载
+	/**
+	 * 确保 Chromium 浏览器存在，如果不存在则下载到 `[context.globalStorageUri.fsPath]/puppeteer` 目录下。
+	 *
+	 * 官方文档中，默认的 Chromium 下载路径是家目录，默认快照是 ".chromium-browser-snapshots"。这里 cline 并没有修改相关设置。
+	 * @returns 返回 `Promise<PCRStats>`，包含 puppeteer 对象和 Chromium 可执行文件的路径。
+	 */
 	private async ensureChromiumExists(): Promise<PCRStats> {
-		// 获取VS Code扩展的全局存储路径
 		const globalStoragePath = this.context?.globalStorageUri?.fsPath
-		// 如果全局存储路径无效，则抛出错误
 		if (!globalStoragePath) {
 			throw new Error("Global storage uri is invalid")
 		}
-		// 拼接puppeteer存储目录的路径
+		// `[context.globalStorageUri.fsPath]/puppeteer` 目录
 		const puppeteerDir = path.join(globalStoragePath, "puppeteer")
-		// 检查puppeteer存储目录是否存在
 		const dirExists = await fileExistsAtPath(puppeteerDir)
-		// 如果目录不存在，则创建该目录，递归创建子目录
 		if (!dirExists) {
 			await fs.mkdir(puppeteerDir, { recursive: true })
 		}
-		// 使用puppeteer-chromium-resolver检查Chromium是否存在
-		// 如果不存在，会将其下载到path.join(puppeteerDir, ".chromium-browser-snapshots")路径下
-		// 如果存在，则返回现有Chromium的路径
+		// 使用 puppeteer-chromium-resolver 检查 Chromium 是否存在
+		// 如果存在，则返回现有 Chromium 的路径；如果不存在，则下载到指定目录并返回路径
 		const stats: PCRStats = await PCR({
 			downloadPath: puppeteerDir,
 		})
 		return stats
 	}
 
-	// 异步方法，用于启动浏览器实例
+	/**
+	 * 启动浏览器实例，并创建一个新的页面实例。初始化 UrlContentFetcher 的 browser 和 page 属性。
+	 */
 	async launchBrowser(): Promise<void> {
 		// 如果浏览器实例已经存在，则直接返回
 		if (this.browser) {
 			return
 		}
-		// 调用ensureChromiumExists方法确保Chromium浏览器存在，并获取相关统计信息
+		// 确保 Chromium 浏览器存在，并获取相关统计信息
 		const stats = await this.ensureChromiumExists()
-		// 使用puppeteer的launch方法启动浏览器
+		// 使用 puppeteer 的 launch 方法启动浏览器
 		this.browser = await stats.puppeteer.launch({
 			// 设置浏览器启动参数，这里设置了用户代理，模拟特定的浏览器版本
 			args: [
@@ -84,30 +89,37 @@ export class UrlContentFetcher {
 		this.page = await this.browser?.newPage()
 	}
 
-	// 异步方法，用于关闭浏览器实例
+	/**
+	 * 关闭浏览器实例，将 UrlContentFetcher 的 browser 和 page 置为 undefined，释放资源
+	 */
 	async closeBrowser(): Promise<void> {
 		// 关闭浏览器实例
 		await this.browser?.close()
-		// 将浏览器实例和页面实例置为undefined，释放资源
 		this.browser = undefined
 		this.page = undefined
 	}
 
-	// 异步方法，用于将指定URL的网页内容转换为Markdown格式
-	// 调用此方法前必须先调用launchBrowser方法启动浏览器，使用完后调用closeBrowser方法关闭浏览器
+	/**
+	 * 将指定 URL 的网页内容转换为 Markdown 格式。
+	 *
+	 * 在 `parseMentions()` 中调用时，必须先调用 `launchBrowser()` 初始化浏览器和页面实例。
+	 * @param url 指定的 URL 地址字符串
+	 * @returns 返回的 Markdown 格式字符串
+	 */
 	async urlToMarkdown(url: string): Promise<string> {
 		// 如果浏览器实例或页面实例未初始化，则抛出错误
 		if (!this.browser || !this.page) {
 			throw new Error("Browser not initialized")
 		}
-		/*
-        - networkidle2表示等待直到至少500毫秒内网络连接不超过2个，类似于Playwright的networkidle
-        - domcontentloaded表示基本的DOM树已经加载完成
-        对于大多数文档类网站，这样的设置应该足够了
-        */
+
 		// 在浏览器页面中打开指定URL，并设置超时时间和等待条件
 		await this.page.goto(url, {
 			timeout: 10_000, // 超时时间为10秒
+			/**
+			 * domcontentloaded 表示基本的 DOM 树已经加载完成
+			 * networkidle2 表示等待直到至少 500 毫秒内网络连接不超过 2 个，类似于 Playwright 的 networkidle
+			 * 对于大多数文档类网站，这样的设置应该足够了
+			 */
 			waitUntil: ["domcontentloaded", "networkidle2"], // 等待直到DOM加载完成且网络空闲
 		})
 		// 获取页面的HTML内容
