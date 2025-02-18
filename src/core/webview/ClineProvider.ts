@@ -28,6 +28,7 @@ import { getUri } from "./getUri"
 import { AutoApprovalSettings, DEFAULT_AUTO_APPROVAL_SETTINGS } from "../../shared/AutoApprovalSettings"
 import { BrowserSettings, DEFAULT_BROWSER_SETTINGS } from "../../shared/BrowserSettings"
 import { ChatSettings, DEFAULT_CHAT_SETTINGS } from "../../shared/ChatSettings"
+import { searchCommits } from "../../utils/git"
 
 /*
 https://github.com/microsoft/vscode-webview-ui-toolkit-samples/blob/main/default/weather-webview/src/providers/WeatherViewProvider.ts
@@ -626,7 +627,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 									await this.postMessageToWebview({
 										type: "invoke",
 										invoke: "sendMessage",
-										text: message.chatContent?.message || "[Proceeding with the task...]",
+										text: message.chatContent?.message || "PLAN_MODE_TOGGLE_RESPONSE",
 										images: message.chatContent?.images,
 									})
 								} else {
@@ -800,6 +801,21 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 							await this.mcpHub?.restartConnection(message.text!)
 						} catch (error) {
 							console.error(`Failed to retry connection for ${message.text}:`, error)
+						}
+						break
+					}
+					case "searchCommits": {
+						const cwd = vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath).at(0)
+						if (cwd) {
+							try {
+								const commits = await searchCommits(message.text || "", cwd)
+								await this.postMessageToWebview({
+									type: "commitSearchResults",
+									commits,
+								})
+							} catch (error) {
+								console.error(`Error searching commits: ${JSON.stringify(error)}`)
+							}
 						}
 						break
 					}
