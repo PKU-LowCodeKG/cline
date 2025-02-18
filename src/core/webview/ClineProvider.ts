@@ -14,6 +14,7 @@ import { selectImages } from "../../integrations/misc/process-images"
 import { getTheme } from "../../integrations/theme/getTheme"
 import WorkspaceTracker from "../../integrations/workspace/WorkspaceTracker"
 import { McpHub } from "../../services/mcp/McpHub"
+import { McpDownloadResponse, McpMarketplaceCatalog, McpMarketplaceItem, McpServer } from "../../shared/mcp"
 import { FirebaseAuthManager, UserInfo } from "../../services/auth/FirebaseAuthManager"
 import { ApiProvider, ModelInfo } from "../../shared/api"
 import { findLast } from "../../shared/array"
@@ -28,6 +29,7 @@ import { getUri } from "./getUri"
 import { AutoApprovalSettings, DEFAULT_AUTO_APPROVAL_SETTINGS } from "../../shared/AutoApprovalSettings"
 import { BrowserSettings, DEFAULT_BROWSER_SETTINGS } from "../../shared/BrowserSettings"
 import { ChatSettings, DEFAULT_CHAT_SETTINGS } from "../../shared/ChatSettings"
+import { DIFF_VIEW_URI_SCHEME } from "../../integrations/editor/DiffViewProvider"
 import { searchCommits } from "../../utils/git"
 
 /*
@@ -566,6 +568,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 								}
 							}
 						})
+
 						break
 					// 【主线】前端发送的消息类型为 "newTask" 时，初始化新的任务
 					case "newTask":
@@ -968,6 +971,55 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						}
 						break
 					}
+					case "fetchMcpMarketplace": {
+						await this.fetchMcpMarketplace(message.bool)
+						break
+					}
+					case "downloadMcp": {
+						if (message.mcpId) {
+							await this.downloadMcp(message.mcpId)
+						}
+						break
+					}
+					case "silentlyRefreshMcpMarketplace": {
+						await this.silentlyRefreshMcpMarketplace()
+						break
+					}
+					// case "openMcpMarketplaceServerDetails": {
+					// 	if (message.text) {
+					// 		const response = await fetch(`https://api.cline.bot/v1/mcp/marketplace/item?mcpId=${message.mcpId}`)
+					// 		const details: McpDownloadResponse = await response.json()
+
+					// 		if (details.readmeContent) {
+					// 			// Disable markdown preview markers
+					// 			const config = vscode.workspace.getConfiguration("markdown")
+					// 			await config.update("preview.markEditorSelection", false, true)
+
+					// 			// Create URI with base64 encoded markdown content
+					// 			const uri = vscode.Uri.parse(
+					// 				`${DIFF_VIEW_URI_SCHEME}:${details.name} README?${Buffer.from(details.readmeContent).toString("base64")}`,
+					// 			)
+
+					// 			// close existing
+					// 			const tabs = vscode.window.tabGroups.all
+					// 				.flatMap((tg) => tg.tabs)
+					// 				.filter((tab) => tab.label && tab.label.includes("README") && tab.label.includes("Preview"))
+					// 			for (const tab of tabs) {
+					// 				await vscode.window.tabGroups.close(tab)
+					// 			}
+
+					// 			// Show only the preview
+					// 			await vscode.commands.executeCommand("markdown.showPreview", uri, {
+					// 				sideBySide: true,
+					// 				preserveFocus: true,
+					// 			})
+					// 		}
+					// 	}
+
+					// 	this.postMessageToWebview({ type: "relinquishControl" })
+
+					// 	break
+					// }
 					case "toggleMcpServer": {
 						// 切换 MCP 服务器的启用状态
 						try {
