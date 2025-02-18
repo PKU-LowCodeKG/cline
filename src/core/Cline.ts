@@ -1742,7 +1742,7 @@ export class Cline {
 				}
 
 				/** 
-				 * 将工具调用的结果添加到 userMessageContent 中，并设置 didAlreadyUseTool 为 true，以防止在同一消息中使用多个工具。
+				 * 将工具调用的描述、工具调用的结果 2 条 Cline Message 添加到 userMessageContent 中，并设置 didAlreadyUseTool 为 true，以防止在同一消息中使用多个工具。
 				 * @param content 工具的结果
 				 */
 				const pushToolResult = (content: ToolResponse) => {
