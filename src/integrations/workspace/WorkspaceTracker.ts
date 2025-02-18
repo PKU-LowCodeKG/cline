@@ -111,7 +111,7 @@ class WorkspaceTracker {
 		this.workspaceDidUpdate()
 	}
 
-	/** 
+	/**
 	 * （当工作区 文件结构 发生变更时），将文件路径的更新推送到 Webview。
 	 */
 	private workspaceDidUpdate() {
