@@ -3408,7 +3408,6 @@ export class Cline {
 				// NOTE: ApiStreamChunk 形式（"text"、"reasoning"、"usage" 三种类型）
 				for await (const chunk of stream) {
 					if (!chunk) {
-						// Sometimes chunk is undefined, no idea that can cause it, but this workaround seems to fix it
 						continue
 					}
 					switch (chunk.type) {
