@@ -15,7 +15,7 @@ import PCR from "puppeteer-chromium-resolver"
 // 从自定义的工具模块中导入fileExistsAtPath函数，用于检查文件是否存在
 import { fileExistsAtPath } from "../../utils/fs"
 // 为了执行git clone命令，导入Node.js的child_process模块
-import { exec } from "child_process";
+import { exec } from "child_process"
 
 // 定义一个接口PCRStats，用于描述puppeteer-chromium-resolver返回的统计信息结构
 interface PCRStats {
@@ -43,7 +43,7 @@ export class UrlContentFetcher {
 	private async ensureChromiumExists(): Promise<PCRStats> {
 		// 获取VS Code扩展的全局存储路径
 		const globalStoragePath = this.context?.globalStorageUri?.fsPath
-        // globalStoragePath: c:\Users\Administrator\AppData\Roaming\Code\User\globalStorage\saoudrizwan.claude-dev
+		// globalStoragePath: c:\Users\Administrator\AppData\Roaming\Code\User\globalStorage\saoudrizwan.claude-dev
 		// 如果全局存储路径无效，则抛出错误
 		if (!globalStoragePath) {
 			throw new Error("Global storage uri is invalid")
@@ -65,19 +65,19 @@ export class UrlContentFetcher {
 		return stats
 	}
 
-    async downloadFile(url: string, filePath: string): Promise<void> {
-        return new Promise((resolve, reject) => {
-            exec(`git clone ${url} ${filePath}`, (error, stdout, stderr) => {
-                if (error) {
-                    console.error(`Error cloning repository: ${stderr}`);
-                    reject(error);
-                } else {
-                    console.log(`Repository cloned successfully: ${stdout}`);
-                    resolve();
-                }
-            });
-        });
-    }
+	async downloadFile(url: string, filePath: string): Promise<void> {
+		return new Promise((resolve, reject) => {
+			exec(`git clone ${url} ${filePath}`, (error, stdout, stderr) => {
+				if (error) {
+					console.error(`Error cloning repository: ${stderr}`)
+					reject(error)
+				} else {
+					console.log(`Repository cloned successfully: ${stdout}`)
+					resolve()
+				}
+			})
+		})
+	}
 
 	// 异步方法，用于启动浏览器实例
 	async launchBrowser(): Promise<void> {

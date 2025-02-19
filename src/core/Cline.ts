@@ -1192,7 +1192,7 @@ export class Cline {
 			if (includeFileDetails) {
 				// To Do: 在includeFileDetails == true的时候调用一次我们设计的函数。
 			}
-			
+
 			// NOTE: 只在最开始的时候（while 的第一次循环，下面这个函数的第一层递归） 包括当前工作目录下的文件列表。
 			const didEndLoop = await this.recursivelyMakeClineRequests(nextUserContent, includeFileDetails, isNewTask)
 			includeFileDetails = false // we only need file details the first time
