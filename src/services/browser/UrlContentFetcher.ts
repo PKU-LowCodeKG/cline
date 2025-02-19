@@ -10,6 +10,8 @@ import TurndownService from "turndown"
 // @ts-ignore 注释用于忽略TypeScript编译器的类型检查错误，因为这里的模块可能没有类型定义文件
 import PCR from "puppeteer-chromium-resolver"
 import { fileExistsAtPath } from "../../utils/fs"
+// 为了执行git clone命令，导入Node.js的child_process模块
+import { exec } from "child_process"
 
 /** Cline 定义接口，用于描述 puppeteer-chromium-resolver 返回的统计信息结构 */
 interface PCRStats {
@@ -63,6 +65,20 @@ export class UrlContentFetcher {
 			downloadPath: puppeteerDir,
 		})
 		return stats
+	}
+
+	async downloadFile(url: string, filePath: string): Promise<void> {
+		return new Promise((resolve, reject) => {
+			exec(`git clone ${url} ${filePath}`, (error, stdout, stderr) => {
+				if (error) {
+					console.error(`Error cloning repository: ${stderr}`)
+					reject(error)
+				} else {
+					console.log(`Repository cloned successfully: ${stdout}`)
+					resolve()
+				}
+			})
+		})
 	}
 
 	/**

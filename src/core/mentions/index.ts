@@ -10,6 +10,7 @@ import { diagnosticsToProblemsString } from "../../integrations/diagnostics"
 import { getLatestTerminalOutput } from "../../integrations/terminal/get-latest-output"
 import { getCommitInfo } from "../../utils/git"
 import { getWorkingState } from "../../utils/git"
+import { url } from "inspector"
 
 export function openMention(mention?: string): void {
 	if (!mention) {
@@ -124,6 +125,8 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 			} else {
 				try {
 					// To Do, 从URL下载软件项目到指定目录（默认当前工作区目录）
+					// urlContentFetcher.downloadFile(mention, cwd);
+					urlContentFetcher.downloadFile(mention, "D:/Downloads/test")
 					// 使用UrlContentFetcher工具从URL获取内容并转换为Markdown格式
 					const markdown = await urlContentFetcher.urlToMarkdown(mention)
 					result = markdown
