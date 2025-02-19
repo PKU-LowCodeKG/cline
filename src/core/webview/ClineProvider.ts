@@ -31,6 +31,7 @@ import { BrowserSettings, DEFAULT_BROWSER_SETTINGS } from "../../shared/BrowserS
 import { ChatSettings, DEFAULT_CHAT_SETTINGS } from "../../shared/ChatSettings"
 import { DIFF_VIEW_URI_SCHEME } from "../../integrations/editor/DiffViewProvider"
 import { searchCommits } from "../../utils/git"
+import { ChatContent } from "../../shared/ChatContent"
 
 /*
 https://github.com/microsoft/vscode-webview-ui-toolkit-samples/blob/main/default/weather-webview/src/providers/WeatherViewProvider.ts
@@ -111,7 +112,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	workspaceTracker?: WorkspaceTracker
 	mcpHub?: McpHub
 	private authManager: FirebaseAuthManager
-	private latestAnnouncementId = "jan-20-2025" // update to some unique identifier when we add a new announcement
+	private latestAnnouncementId = "feb-18-2025" // update to some unique identifier when we add a new announcement
 
 	constructor(
 		readonly context: vscode.ExtensionContext,
@@ -406,7 +407,15 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						// (see normalizeApiConfiguration > openrouter)
 						// Prefetch marketplace and OpenRouter models
 
-						this.prefetchMcpMarketplace()
+						this.getGlobalState("mcpMarketplaceCatalog").then((mcpMarketplaceCatalog) => {
+							if (mcpMarketplaceCatalog) {
+								this.postMessageToWebview({
+									type: "mcpMarketplaceCatalog",
+									mcpMarketplaceCatalog: mcpMarketplaceCatalog as McpMarketplaceCatalog,
+								})
+							}
+						})
+						this.silentlyRefreshMcpMarketplace()
 						this.refreshOpenRouterModels().then(async (openRouterModels) => {
 							if (openRouterModels) {
 								// update model info in state (this needs to be done here since we don't want to update state while settings is open, and we may refresh models there)
@@ -542,105 +551,9 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 							await this.postStateToWebview()
 						}
 						break
-					case "chatSettings":
+					case "togglePlanActMode":
 						if (message.chatSettings) {
-							const didSwitchToActMode = message.chatSettings.mode === "act"
-
-							// Get previous model info that we will revert to after saving current mode api info
-							const {
-								apiConfiguration,
-								previousModeApiProvider: newApiProvider,
-								previousModeModelId: newModelId,
-								previousModeModelInfo: newModelInfo,
-							} = await this.getState()
-
-							// Save the last model used in this mode
-							await this.updateGlobalState("previousModeApiProvider", apiConfiguration.apiProvider)
-							switch (apiConfiguration.apiProvider) {
-								case "anthropic":
-								case "bedrock":
-								case "vertex":
-								case "gemini":
-									await this.updateGlobalState("previousModeModelId", apiConfiguration.apiModelId)
-									break
-								case "openrouter":
-									await this.updateGlobalState("previousModeModelId", apiConfiguration.openRouterModelId)
-									await this.updateGlobalState("previousModeModelInfo", apiConfiguration.openRouterModelInfo)
-									break
-								case "vscode-lm":
-									await this.updateGlobalState("previousModeModelId", apiConfiguration.vsCodeLmModelSelector)
-									break
-								case "openai":
-									await this.updateGlobalState("previousModeModelId", apiConfiguration.openAiModelId)
-									await this.updateGlobalState("previousModeModelInfo", apiConfiguration.openAiModelInfo)
-									break
-								case "ollama":
-									await this.updateGlobalState("previousModeModelId", apiConfiguration.ollamaModelId)
-									break
-								case "lmstudio":
-									await this.updateGlobalState("previousModeModelId", apiConfiguration.lmStudioModelId)
-									break
-								case "litellm":
-									await this.updateGlobalState("previousModeModelId", apiConfiguration.liteLlmModelId)
-									break
-							}
-
-							// Restore the model used in previous mode
-							if (newApiProvider && newModelId) {
-								await this.updateGlobalState("apiProvider", newApiProvider)
-								switch (newApiProvider) {
-									case "anthropic":
-									case "bedrock":
-									case "vertex":
-									case "gemini":
-										await this.updateGlobalState("apiModelId", newModelId)
-										break
-									case "openrouter":
-										await this.updateGlobalState("openRouterModelId", newModelId)
-										await this.updateGlobalState("openRouterModelInfo", newModelInfo)
-										break
-									case "vscode-lm":
-										await this.updateGlobalState("vsCodeLmModelSelector", newModelId)
-										break
-									case "openai":
-										await this.updateGlobalState("openAiModelId", newModelId)
-										await this.updateGlobalState("openAiModelInfo", newModelInfo)
-										break
-									case "ollama":
-										await this.updateGlobalState("ollamaModelId", newModelId)
-										break
-									case "lmstudio":
-										await this.updateGlobalState("lmStudioModelId", newModelId)
-										break
-									case "litellm":
-										await this.updateGlobalState("liteLlmModelId", newModelId)
-										break
-								}
-
-								if (this.cline) {
-									const { apiConfiguration: updatedApiConfiguration } = await this.getState()
-									this.cline.api = buildApiHandler(updatedApiConfiguration)
-								}
-							}
-
-							await this.updateGlobalState("chatSettings", message.chatSettings)
-							await this.postStateToWebview()
-							// console.log("chatSettings", message.chatSettings)
-							if (this.cline) {
-								this.cline.updateChatSettings(message.chatSettings)
-								if (this.cline.isAwaitingPlanResponse && didSwitchToActMode) {
-									this.cline.didRespondToPlanAskBySwitchingMode = true
-									// this is necessary for the webview to update accordingly, but Cline instance will not send text back as feedback message
-									await this.postMessageToWebview({
-										type: "invoke",
-										invoke: "sendMessage",
-										text: message.chatContent?.message || "PLAN_MODE_TOGGLE_RESPONSE",
-										images: message.chatContent?.images,
-									})
-								} else {
-									this.cancelTask()
-								}
-							}
+							await this.togglePlanActModeWithChatSettings(message.chatSettings, message.chatContent)
 						}
 						break
 					// case "relaunchChromeDebugMode":
@@ -780,6 +693,10 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						await this.handleSignOut()
 						break
 					}
+					case "showMcpView": {
+						await this.postMessageToWebview({ type: "action", action: "mcpButtonClicked" })
+						break
+					}
 					case "openMcpSettings": {
 						const mcpSettingsFilePath = await this.mcpHub?.getMcpSettingsFilePath()
 						if (mcpSettingsFilePath) {
@@ -793,6 +710,20 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 					}
 					case "downloadMcp": {
 						if (message.mcpId) {
+							// 1. Toggle to act mode if we are in plan mode
+							const { chatSettings } = await this.getStateToPostToWebview()
+							if (chatSettings.mode === "plan") {
+								await this.togglePlanActModeWithChatSettings({ mode: "act" })
+							}
+
+							// 2. Enable MCP settings if disabled
+							// Enable MCP mode if disabled
+							const mcpConfig = vscode.workspace.getConfiguration("cline.mcp")
+							if (mcpConfig.get<string>("mode") !== "full") {
+								await mcpConfig.update("mode", "full", true)
+							}
+
+							// 3. download MCP
 							await this.downloadMcp(message.mcpId)
 						}
 						break
@@ -890,6 +821,106 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			null,
 			this.disposables,
 		)
+	}
+
+	async togglePlanActModeWithChatSettings(chatSettings: ChatSettings, chatContent?: ChatContent) {
+		const didSwitchToActMode = chatSettings.mode === "act"
+
+		// Get previous model info that we will revert to after saving current mode api info
+		const {
+			apiConfiguration,
+			previousModeApiProvider: newApiProvider,
+			previousModeModelId: newModelId,
+			previousModeModelInfo: newModelInfo,
+		} = await this.getState()
+
+		// Save the last model used in this mode
+		await this.updateGlobalState("previousModeApiProvider", apiConfiguration.apiProvider)
+		switch (apiConfiguration.apiProvider) {
+			case "anthropic":
+			case "bedrock":
+			case "vertex":
+			case "gemini":
+				await this.updateGlobalState("previousModeModelId", apiConfiguration.apiModelId)
+				break
+			case "openrouter":
+				await this.updateGlobalState("previousModeModelId", apiConfiguration.openRouterModelId)
+				await this.updateGlobalState("previousModeModelInfo", apiConfiguration.openRouterModelInfo)
+				break
+			case "vscode-lm":
+				await this.updateGlobalState("previousModeModelId", apiConfiguration.vsCodeLmModelSelector)
+				break
+			case "openai":
+				await this.updateGlobalState("previousModeModelId", apiConfiguration.openAiModelId)
+				await this.updateGlobalState("previousModeModelInfo", apiConfiguration.openAiModelInfo)
+				break
+			case "ollama":
+				await this.updateGlobalState("previousModeModelId", apiConfiguration.ollamaModelId)
+				break
+			case "lmstudio":
+				await this.updateGlobalState("previousModeModelId", apiConfiguration.lmStudioModelId)
+				break
+			case "litellm":
+				await this.updateGlobalState("previousModeModelId", apiConfiguration.liteLlmModelId)
+				break
+		}
+
+		// Restore the model used in previous mode
+		if (newApiProvider && newModelId) {
+			await this.updateGlobalState("apiProvider", newApiProvider)
+			switch (newApiProvider) {
+				case "anthropic":
+				case "bedrock":
+				case "vertex":
+				case "gemini":
+					await this.updateGlobalState("apiModelId", newModelId)
+					break
+				case "openrouter":
+					await this.updateGlobalState("openRouterModelId", newModelId)
+					await this.updateGlobalState("openRouterModelInfo", newModelInfo)
+					break
+				case "vscode-lm":
+					await this.updateGlobalState("vsCodeLmModelSelector", newModelId)
+					break
+				case "openai":
+					await this.updateGlobalState("openAiModelId", newModelId)
+					await this.updateGlobalState("openAiModelInfo", newModelInfo)
+					break
+				case "ollama":
+					await this.updateGlobalState("ollamaModelId", newModelId)
+					break
+				case "lmstudio":
+					await this.updateGlobalState("lmStudioModelId", newModelId)
+					break
+				case "litellm":
+					await this.updateGlobalState("liteLlmModelId", newModelId)
+					break
+			}
+
+			if (this.cline) {
+				const { apiConfiguration: updatedApiConfiguration } = await this.getState()
+				this.cline.api = buildApiHandler(updatedApiConfiguration)
+			}
+		}
+
+		await this.updateGlobalState("chatSettings", chatSettings)
+		await this.postStateToWebview()
+		// console.log("chatSettings", message.chatSettings)
+		if (this.cline) {
+			this.cline.updateChatSettings(chatSettings)
+			if (this.cline.isAwaitingPlanResponse && didSwitchToActMode) {
+				this.cline.didRespondToPlanAskBySwitchingMode = true
+				// this is necessary for the webview to update accordingly, but Cline instance will not send text back as feedback message
+				await this.postMessageToWebview({
+					type: "invoke",
+					invoke: "sendMessage",
+					text: chatContent?.message || "PLAN_MODE_TOGGLE_RESPONSE",
+					images: chatContent?.images,
+				})
+			} else {
+				this.cancelTask()
+			}
+		}
 	}
 
 	async subscribeEmail(email?: string) {
@@ -1111,14 +1142,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 				vscode.window.showErrorMessage(errorMessage)
 			}
 			return undefined
-		}
-	}
-
-	async prefetchMcpMarketplace() {
-		try {
-			await this.fetchMcpMarketplaceFromApi(true)
-		} catch (error) {
-			console.error("Failed to prefetch MCP marketplace:", error)
 		}
 	}
 
