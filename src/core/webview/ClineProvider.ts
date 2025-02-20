@@ -153,8 +153,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	mcpHub?: McpHub
 	// authManager表示认证管理器
 	private authManager: FirebaseAuthManager
-	// latestAnnouncementId表示最新公告的标识符
-	private latestAnnouncementId = "feb-18-2025" // update to some unique identifier when we add a new announcement
+	private latestAnnouncementId = "feb-19-2025" // update to some unique identifier when we add a new announcement
 
 	/**
 	 * 构造函数用于初始化ClineProvider实例及其核心组件
@@ -987,6 +986,16 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						}
 						break
 					}
+					case "deleteMcpServer": {
+						if (message.serverName) {
+							this.mcpHub?.deleteServer(message.serverName)
+						}
+						break
+					}
+					case "fetchLatestMcpServersFromHub": {
+						this.mcpHub?.sendLatestMcpServers()
+						break
+					}
 					case "searchCommits": {
 						const cwd = vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath).at(0)
 						if (cwd) {
@@ -1546,7 +1555,10 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			})
 
 			// Create task with context from README
-			const task = `Set up the MCP server from ${mcpDetails.githubUrl}. Use "${mcpDetails.mcpId}" as the server name in cline_mcp_settings.json. Here is the project's README to help you get started:\n\n${mcpDetails.readmeContent}\n${mcpDetails.llmsInstallationContent}`
+			const task = `Set up the MCP server from ${mcpDetails.githubUrl}. 
+Use "${mcpDetails.mcpId}" as the server name in cline_mcp_settings.json.
+Once installed, demonstrate the server's capabilities by using one of its tools.
+Here is the project's README to help you get started:\n\n${mcpDetails.readmeContent}\n${mcpDetails.llmsInstallationContent}`
 
 			// Initialize task and show chat view
 			await this.initClineWithTask(task)
