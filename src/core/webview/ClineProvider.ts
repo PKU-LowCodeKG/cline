@@ -1126,7 +1126,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	 * 如果电子邮件地址有效，则将其发送到指定的API端点进行订阅，并通知Webview订阅成功。
 	 * 目前忽略API请求的错误，但在未来可能会处理这些错误。
 	 * @param {string} [email] - 要订阅的电子邮件地址。如果未提供或为空，则函数直接返回。
-	 */	
+	 */
 	async subscribeEmail(email?: string) {
 		// 如果未提供电子邮件地址，直接返回
 		if (!email) {

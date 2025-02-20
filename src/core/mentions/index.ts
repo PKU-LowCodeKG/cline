@@ -53,6 +53,7 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 	const mentions: Set<string> = new Set()
 
 	// 使用正则表达式匹配文本中的提及内容，并对其进行替换处理
+	// NOTE: 这里的 mention 是完整的正则匹配，mention 是正则中的第一个捕获组（只有 "@" 后面的关键词）
 	let parsedText = text.replace(mentionRegexGlobal, (match, mention) => {
 		// 将匹配到的提及内容添加到Set中
 		mentions.add(mention)
@@ -62,7 +63,7 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 			// 将其替换为特定格式的文本，提示用户可以查看下方的网站内容
 			return `'${mention}' (see below for site content)`
 		}
-		// 如果提及内容以 "/" 开头（插件前端 @Foler 或者 @File）
+		// 如果提及内容以 "/" 开头（插件前端 @Folder 或者 @File）
 		else if (mention.startsWith("/")) {
 			// 去除路径前面的斜杠
 			const mentionPath = mention.slice(1)
@@ -139,7 +140,7 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 			// 将URL的内容或错误信息以特定的标签格式追加到解析后的文本中
 			parsedText += `\n\n<url_content url="${mention}">\n${result}\n</url_content>`
 		}
-		// 如果提及内容以 "/" 开头（插件前端 @Foler 或者 @File）
+		// 如果提及内容以 "/" 开头（插件前端 @Folder 或者 @File）
 		else if (mention.startsWith("/")) {
 			// 去除路径前面的斜杠
 			const mentionPath = mention.slice(1)

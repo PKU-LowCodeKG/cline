@@ -103,7 +103,7 @@ export class Cline {
 	private chatSettings: ChatSettings
 	/** Cline LLM API 对话历史，用作上下文的一部分提供给 各种 LLM */
 	apiConversationHistory: Anthropic.MessageParam[] = []
-	/** Cline Message 历史，用于 webview 呈现 */
+	/** Cline Message 历史，用于 webview 呈现。它记录着用户的原始输入（如 "@" 辅助功能） */
 	clineMessages: ClineMessage[] = []
 	private clineIgnoreController: ClineIgnoreController
 	private askResponse?: ClineAskResponse
@@ -1458,8 +1458,8 @@ export class Cline {
 	 * 4. 如果之前的 API 请求的 token 使用量接近上下文窗口的最大值，则截断 LLM API 对话历史记录
 	 * 5. `SYSTEM PROMPT` + `User Instructions` + 截断后的 LLM API 对话历史记录，提供给模型
 	 * 6. 获取返回的流并创建异步迭代器。处理 API 请求和重试
-	 * @param previousApiReqIndex
-	 * @returns
+	 * @param previousApiReqIndex 上一个 api_req_started 在 ClineMessage 数组中的索引，以检查 token 使用情况并确定是否需要截断对话历史记录
+	 * @returns {ApiStream} 一个异步生成器，用于逐步获取 API 数据流
 	 */
 	async *attemptApiRequest(previousApiReqIndex: number): ApiStream {
 		// Wait for MCP servers to be connected before generating system prompt
@@ -3195,10 +3195,12 @@ export class Cline {
 	}
 
 	/**
-	 * 【主线】递归地发出 Cline 请求
-	 *
-	 * includeFileDetails 是否包括当前工作目录下的文件列表。
-	 * 只在最开始的时候（while 的第一次循环，本函数的第一层递归）为 true
+	 * 【主线】递归地发出 Cline 请求。一些值得注意的点：
+	 * 1. 解析上一轮递归中的 userContent（目前只解析 "@" 辅助功能）和当前的环境信息，用解析结果更新 userContent
+	 * 2. 通过更新 userContent 和 ClineMessage 数组，创造和 LLM 交互的 "role"为"user" 的信息
+	 * 3. 处理 LLM response 的流式结果 ApiStreamChunk（"text"、"reasoning"、"usage" 三种类型）
+	 * @param userContent Cline 的 API 对话中，"role"为"user"的 Anthropic 消息的"content"部分。它是一个对象数组，包括：文本、图片、工具调用、工具调用结果
+	 * @param includeFileDetails 是否包括当前工作目录下的文件列表。只在 while 的第一次循环，本函数的第一层递归 为 true
 	 * @returns 是否继续循环的 bool，用于终止父循环
 	 */
 	async recursivelyMakeClineRequests(
@@ -3503,7 +3505,7 @@ export class Cline {
 			partialBlocks.forEach((block) => {
 				block.partial = false
 			})
-			// this.assistantMessageContent.forEach((e) => (e.partial = false)) // cant just do this bc a tool could be in the middle of executing ()
+			// this.assistantMessageConten8t.forEach((e) => (e.partial = false)) // cant just do this bc a tool could be in the mid-dle of executing ()
 			if (partialBlocks.length > 0) {
 				this.presentAssistantMessage() // if there is content to update then it will complete and update this.userMessageContentReady to true, which we pwaitfor before making the next request. all this is really doing is presenting the last partial message that we just set to complete
 			}
