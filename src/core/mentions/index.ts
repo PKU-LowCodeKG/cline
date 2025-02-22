@@ -11,6 +11,7 @@ import { getLatestTerminalOutput } from "../../integrations/terminal/get-latest-
 import { getCommitInfo } from "../../utils/git"
 import { getWorkingState } from "../../utils/git"
 import { url } from "inspector"
+import axios from "axios"
 
 export function openMention(mention?: string): void {
 	if (!mention) {
@@ -212,6 +213,19 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 				parsedText += `\n\n<git_commit hash="${mention}">\nError fetching commit info: ${error.message}\n</git_commit>`
 			}
 		}
+
+		// 如果提及内容是 "reuse:"
+		else if (mention.startsWith("reuse:")) {
+			const url = mention.slice(6)
+			console.log(`Reuse Test: ${url}`)
+
+			try {
+				const summary = await getSummaryFromRepoUrl(url)
+				parsedText += `\n\n<repo_summary>\n${summary}\n</repo_summary>`
+			} catch (error) {
+				parsedText += `\n\n<repo_summary>\nError fetching summary: ${error.message}\n</repo_summary>`
+			}
+		}
 	}
 
 	// 如果存在URL提及内容
@@ -296,4 +310,39 @@ function getWorkspaceProblems(cwd: string): string {
 		return "No errors or warnings detected."
 	}
 	return result
+}
+
+async function getSummaryFromRepoUrl(url: string): Promise<string> {
+	try {
+		const summary = await axios.post("https://example.com/", { url })
+		return summary.data
+	} catch (error) {
+		console.error(`Error fetching summary for repo at ${url}: ${error.message}`)
+		return `复用组：Summary for repo at ${url}
+博客系统
+├── 用户管理
+│   ├── 修改账户信息 [1]
+├── 博客管理
+│   ├── 博客列表查询 [2]
+│   ├── 获取博客详情 [6]
+│   ├── 删除博客 [3]
+│   ├── 更新博客可见性 [5]
+├── 分类与标签管理
+│   ├── 获取分类和标签 [4]
+├── 评论管理
+│   ├── 分页查询评论 [7]
+│   ├── 更新评论公开状态 [8]
+│   ├── 删除评论 [9]
+│   ├── 修改评论 [10]
+├── 友链管理
+│   ├── 获取友链列表 [11]
+│   ├── 更新友链公开状态 [12]
+│   ├── 添加友链 [13]
+├── 动态管理
+│   ├── 获取动态列表 [14]
+│   ├── 更新动态公开状态 [15]
+├── 访客管理
+│   ├── 获取访客列表 [16]
+│   ├── 删除访客 [17]`
+	}
 }

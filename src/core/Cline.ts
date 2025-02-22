@@ -265,7 +265,7 @@ export class Cline {
 		return []
 	}
 
-	/** 将一条 ClineMessage 存入消息数组，并设置它对应的 API 对话索引 */
+	/** 将一条 ClineMessage 存入消息数组，并设置它对应的 API 对话索引（只在 ask 和 say 中调用） */
 	private async addToClineMessages(message: ClineMessage) {
 		// these values allow us to reconstruct the conversation history at the time this cline message was created
 		// it's important that apiConversationHistory is initialized before we add cline messages
@@ -904,6 +904,8 @@ export class Cline {
 
 		await this.providerRef.deref()?.postStateToWebview()
 
+		//【主线】这是一个新任务的第一条 ClineMessage，用于原样展示用户输入的任务描述
+		// 同时，在后续过程中还会取 第[0]条作为该任务的描述
 		await this.say("text", task, images)
 
 		this.isInitialized = true
@@ -1216,6 +1218,7 @@ export class Cline {
 			//const totalCost = this.calculateApiCost(totalInputTokens, totalOutputTokens)
 			// NOTE: 目前 Cline 的 task 永远不会“完成”。didEndLoop 只有当用户达到最大请求并拒绝重置计数时才会发生。
 			if (didEndLoop) {
+				console.log("任务完成")
 				// For now a task never 'completes'. This will only happen if the user hits max requests and denies resetting the count.
 				//this.say("task_completed", `Task completed. Total API usage cost: ${totalCost}`)
 				break
@@ -3265,18 +3268,32 @@ export class Cline {
 
 		// Save checkpoint if this is the first API request
 		const isFirstRequest = this.clineMessages.filter((m) => m.say === "api_req_started").length === 0
+
+		// TODO: 如果我们采用了 @reuse，这里不应该 say("checkpoint_created") 和 say("api_req_started")，而是在后面直接发送 @reuse 的内容
+		let reuseFlag = false
+		for (const messageBlock of userContent) {
+			if (messageBlock.type === "text" && messageBlock.text.includes("@reuse")) {
+				reuseFlag = true
+				break
+			}
+		}
+		if (!reuseFlag) {
+
 		if (isFirstRequest) {
 			await this.say("checkpoint_created") // no hash since we need to wait for CheckpointTracker to be initialized
 		}
 
 		// getting verbose details is an expensive operation, it uses globby to top-down build file structure of project which for large projects can take a few seconds
 		// for the best UX we show a placeholder api_req_started message with a loading spinner as this happens
+		// 【主线】将"role"为"user"的消息数组的 content 拼接成一个字符串，作为 api_req_started 这条 ClineMessage 的内容
 		await this.say(
 			"api_req_started",
 			JSON.stringify({
 				request: userContent.map((block) => formatContentBlockToMarkdown(block)).join("\n\n") + "\n\nLoading...",
 			}),
 		)
+
+		}
 
 		// use this opportunity to initialize the checkpoint tracker (can be expensive to initialize in the constructor)
 		// FIXME: right now we're letting users init checkpoints for old tasks, but this could be a problem if opening a task in the wrong workspace
@@ -3303,9 +3320,33 @@ export class Cline {
 		}
 
 		const [parsedUserContent, environmentDetails] = await this.loadContext(userContent, includeFileDetails)
+		console.log("userContent 和 environmentDetails 解析完毕", parsedUserContent)
 		userContent = parsedUserContent
 		// add environment details as its own text block, separate from tool results
 		userContent.push({ type: "text", text: environmentDetails })
+
+		// 如果用户内容中包含 "<repo_summary>"，则直接发送 "<repo_summary>" 的内容
+		for (const messageBlock of parsedUserContent) {
+			if (messageBlock.type === "text" && messageBlock.text.includes("<repo_summary>")) {
+				await this.say("text", messageBlock.text)
+				// 此时，由于 userContent 中的 @reuse 已经被替换为 <repo_summary>，所以上面的 reuseFlag 在下一次循环中不会被设置为 true
+				// 返回 false 会使得下一轮 userContent 变为
+				// nextUserContent = [
+				// 	{
+				// 		type: "text",
+				// 		text: formatResponse.noToolsUsed(),
+				// 	},
+				// ]
+				// 在第二轮中，由于没有 "api_req_started"，所以会加一条 "checkpoint_created"
+				// 然后 加一条 "api_req_started"，内容为 "noToolsUsed()" + Loading...
+				// 然后在 loadContext 中 加上 <environment_details>
+				// 接着，把这俩消息作为 role: "user" 的 API 消息发送
+				// JSON.stringify() 把这俩作为 request 作为上面 "api_req_started" 的内容，覆盖了之前的内容
+				// --- 上面的 API 消息会得到 “对不起,我之前没有使用工具……”之类的回复，以及 <plan_mode_response> 工具调用
+				// updateApiReqMsg() 会更新上面 "api_req_started" 的指标
+				return false
+			}
+		}
 
 		await this.addToApiConversationHistory({
 			role: "user",
@@ -3520,6 +3561,7 @@ export class Cline {
 			// NOTE: assistantMessage 此时是 原始的 LLM response 加上了 3 种说明之一（this.abort、this.didRejectTool、this.didAlreadyUseTool）
 			// - 在之前处理 LLM response 的流式结果时，this.abort 为 true，则利用 abortStream 中加入对话历史
 			// - 否则，在下面 将其加入对话历史
+
 			if (assistantMessage.length > 0) {
 				await this.addToApiConversationHistory({
 					role: "assistant",
