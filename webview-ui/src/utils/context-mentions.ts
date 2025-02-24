@@ -50,6 +50,8 @@ export enum ContextMenuOptionType {
 	Terminal = "terminal",
 	URL = "url",
 	Git = "git",
+	// 增加 reuse 选项
+	Reuse = "reuse",
 	NoResults = "noResults",
 }
 
@@ -105,6 +107,8 @@ export function getContextMenuOptions(
 			{ type: ContextMenuOptionType.Git },
 			{ type: ContextMenuOptionType.Folder },
 			{ type: ContextMenuOptionType.File },
+			// 增加 reuse 选项
+			{ type: ContextMenuOptionType.Reuse },
 		]
 	}
 
@@ -112,6 +116,10 @@ export function getContextMenuOptions(
 	const suggestions: ContextMenuQueryItem[] = []
 
 	// Check for top-level option matches
+	// 增加 reuse 选项
+	if ("reuse".startsWith(lowerQuery)) {
+		suggestions.push({type: ContextMenuOptionType.Reuse})
+	}
 	if ("git".startsWith(lowerQuery)) {
 		suggestions.push({
 			type: ContextMenuOptionType.Git,

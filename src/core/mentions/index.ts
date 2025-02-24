@@ -214,9 +214,16 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 			}
 		}
 
-		// 如果提及内容是 "reuse:"
-		else if (mention.startsWith("reuse:")) {
-			const url = mention.slice(6)
+		// 如果提及内容是 "reuse"
+		else if (mention.startsWith("reuse")) {
+			// 使用正则表达式从mention中提取GitHub仓库URL
+			const urlMatch = mention.match(/https:\/\/github\.com\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+/)
+			if (!urlMatch) {
+				console.error("No valid GitHub repository URL found in reuse mention")
+				return `Invalid reuse mention: No GitHub repository URL found`
+			}
+
+			const url = urlMatch[0]
 			console.log(`Reuse Test: ${url}`)
 
 			try {
@@ -226,6 +233,18 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 				parsedText += `\n\n<repo_summary>\nError fetching summary: ${error.message}\n</repo_summary>`
 			}
 		}
+		// 如果提及内容是 "reuse:"
+		// else if (mention.startsWith("reuse:")) {
+		// 	const url = mention.slice(6)
+		// 	console.log(`Reuse Test: ${url}`)
+		
+		// 	try {
+		// 		const summary = await getSummaryFromRepoUrl(url)
+		// 		parsedText += `\n\n<repo_summary>\n${summary}\n</repo_summary>`
+		// 	} catch (error) {
+		// 		parsedText += `\n\n<repo_summary>\nError fetching summary: ${error.message}\n</repo_summary>`
+		// 	}
+		// }
 	}
 
 	// 如果存在URL提及内容
