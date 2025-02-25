@@ -54,7 +54,8 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 	const mentions: Set<string> = new Set()
 
 	// 使用正则表达式匹配文本中的提及内容，并对其进行替换处理
-	// NOTE: 这里的 mention 是完整的正则匹配，mention 是正则中的第一个捕获组（只有 "@" 后面的关键词）
+	// NOTE: 这里的 match 是完整的正则匹配结果，mention 是正则中的第一个捕获组（只有 "@" 后面的关键词）
+	// 尽管 replace 方法只替换一次，但由于 mentionRegexGlobal 使用了全局标志 "g"，所以会匹配所有
 	let parsedText = text.replace(mentionRegexGlobal, (match, mention) => {
 		// 将匹配到的提及内容添加到Set中
 		mentions.add(mention)
@@ -233,18 +234,6 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 				parsedText += `\n\n<repo_summary>\nError fetching summary: ${error.message}\n</repo_summary>`
 			}
 		}
-		// 如果提及内容是 "reuse:"
-		// else if (mention.startsWith("reuse:")) {
-		// 	const url = mention.slice(6)
-		// 	console.log(`Reuse Test: ${url}`)
-		
-		// 	try {
-		// 		const summary = await getSummaryFromRepoUrl(url)
-		// 		parsedText += `\n\n<repo_summary>\n${summary}\n</repo_summary>`
-		// 	} catch (error) {
-		// 		parsedText += `\n\n<repo_summary>\nError fetching summary: ${error.message}\n</repo_summary>`
-		// 	}
-		// }
 	}
 
 	// 如果存在URL提及内容
