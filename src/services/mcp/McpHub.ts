@@ -76,7 +76,7 @@ const McpSettingsSchema = z.object({
  * TypeScript 形式的 MCP 服务器需要连接（connect）到传输（transport）以与客户端通信。Cline 选择了 stdio 传输（StdioClientTransport）。
  *
  * Cline 是通过在 SYSTEM PROMPT 中：
- * 1. 定义了 <use_mcp_tool> 和 <access_mcp_resource> 两个工具，并提供了使用示例（正如其他工具，目前 模型在一次回复中 最多只允许一个 MCP 工具调用）
+ * 1. 定义了 <use_mcp_tool> 和 <access_mcp_resource> 两个工具，并提供了使用示例（正如其他工具，目前 在一条 Assistant Message 中最多只允许一个 MCP 工具调用）
  * 2. 列出了所有 connected 的 MCP 服务器的信息：服务器名称、配置信息，工具信息，资源信息
  * 3. 如果 mode 为 full，还会给出创建新的 MCP 服务器的提示
  *

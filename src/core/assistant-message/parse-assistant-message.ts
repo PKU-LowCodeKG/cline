@@ -2,7 +2,13 @@ import { AssistantMessageContent, TextContent, ToolUse, ToolParamName, toolParam
 
 /**
  * 从待解析的 文本 中解析出 AssistantMessageContent 数组
- * @param assistantMessage 带解析的助手消息
+ * 
+ * 遍历文本，逐个字符解析。把 模型的响应Chunk 中的 **纯文本 和 被包裹在其中的工具调用标签** 分开，记为 `text` 和 `tool_use` 类型的 Assistant 消息块，形成 AssistantMessageContent 数组并返回
+ * 
+ * 根据这个函数的实现：
+ * 1. 模型的一次响应中，可以调用多个工具，每个工具调用都是一个 `tool_use` 类型的 Assistant 消息块，而工具调用之间的文本内容则是 `text` 类型的 Assistant 消息块。
+ * 2. 目前一个 Assistant 消息块只能最多包含一个工具调用。如果模型响应中 出现了 工具调用标签嵌套 的情况，内层的工具调用标签 只会被作为纯文本来解析。
+ * @param assistantMessage 待解析的 模型的响应Chunk 文本
  * @returns AssistantMessageContent[]
  */
 export function parseAssistantMessage(assistantMessage: string) {
