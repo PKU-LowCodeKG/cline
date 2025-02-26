@@ -75,6 +75,11 @@ const McpSettingsSchema = z.object({
  *    - 创建 MCP 客户端，客户端能够连接到任何符合 MCP 规范的服务器。
  * TypeScript 形式的 MCP 服务器需要连接（connect）到传输（transport）以与客户端通信。Cline 选择了 stdio 传输（StdioClientTransport）。
  *
+ * Cline 是通过在 SYSTEM PROMPT 中：
+ * 1. 定义了 <use_mcp_tool> 和 <access_mcp_resource> 两个工具，并提供了使用示例（正如其他工具，目前 模型在一次回复中 最多只允许一个 MCP 工具调用）
+ * 2. 列出了所有 connected 的 MCP 服务器的信息：服务器名称、配置信息，工具信息，资源信息
+ * 3. 如果 mode 为 full，还会给出创建新的 MCP 服务器的提示
+ *
  * Model Context Protocol（MCP）是一个用于在应用程序和 LLM 之间提供上下文的标准化协议。它旨在将上下文提供与实际的 LLM 交互分离，从而简化开发流程并提高灵活性。
  * @docs https://modelcontextprotocol.io/introduction
  * @server https://github.com/modelcontextprotocol/servers
@@ -96,11 +101,13 @@ export class McpHub {
 		this.initializeMcpServers()
 	}
 
+	/** 返回所有 存在没有 disabled 的连接的 McpServer 对象  */
 	getServers(): McpServer[] {
 		// Only return enabled servers
 		return this.connections.filter((conn) => !conn.server.disabled).map((conn) => conn.server)
 	}
 
+	/** 返回用户在 VSCode 中对 Cline MCP 的模式设置（full, server-user-only, off）  */
 	getMode(): McpMode {
 		return vscode.workspace.getConfiguration("cline.mcp").get<McpMode>("mode", "full")
 	}
