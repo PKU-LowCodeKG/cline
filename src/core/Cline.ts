@@ -114,8 +114,17 @@ export class Cline {
 	/** 连续发生的错误计数器（指思考失败？答复失败？没有采用工具调用？） */
 	private consecutiveMistakeCount: number = 0
 	private providerRef: WeakRef<ClineProvider>
+	/**
+	 * 当前 Cline 实例绑定的任务是否被废弃，只在 Cline 实例的 abortTask() 中被改为 true。
+	 * 所有 `abortTask()` 的地方，紧跟着 `this.cline = undefined`，即 Cline 实例被废弃。
+	 * 说明 Cline 实例的生命周期完全和其绑定的任务一致。
+	 */
 	private abort: boolean = false
 	didFinishAbortingStream = false
+	/**
+	 * 表示 Cline 实例是否被废弃。该变量只在 ClineProvider 的 cancelTask() 中被改为 true。
+	 * 说明 Cline 实例的生命周期完全和其绑定的任务一致。 
+	 */
 	abandoned = false
 	private diffViewProvider: DiffViewProvider
 	private checkpointTracker?: CheckpointTracker
@@ -629,13 +638,18 @@ export class Cline {
 	/**
 	 * 【主线】
 	 * Cline ask 用于向用户询问，在前端一般表现为 Cline wants to do sth (edit this file, execute this command, etc.)
-	 * 在向用户询问后，使用 pWaitFor 库等待用户答复
+	 * 
+	 * 【ask 和 say 的区别】 ask 在向用户询问后，使用 pWaitFor 库等待用户答复
 	 *
 	 * Cline askResponse 是用户在前端对 Cline ask 的回应：“接受”按钮、“拒绝”按钮、还是文本框输入答复。
 	 * 无论是哪一种，都是通过 `vscode.postMessage()` 给后端传递 "askResponse" 类型消息，再由 ClineProvider 定义的 onDidReceiveMessage 处理。
 	 * 由 `handleWebviewAskResponse()` 函数设置 Cline 实例的 askResponse 3 个属性。
 	 *
-	 * partial 变量有三个有效的状态：
+	 * 【ask 和 say 的共性】
+	 * 1. ask 和 say 的 type 对后端处理无用，只涉及前端，比如以不同的 ui 元素展示。
+	 * 2. ask 和 say 函数本身只会影响后端的 Cline Message，不会直接影响 API 对话历史。
+	 *    只不过 Cline Message 的一部分内容会在别处转为 API 对话历史
+	 * 3. partial 变量有三个有效的状态：
 	 *    - true：表示当前是一个部分消息，即这条消息还没有完整接收或处理，只有部分内容。【被截断的消息的一部分】
 	 *    - false：表示这条消息已经完成，即消息的内容已经完整地接收或处理完毕。【被截断的消息的所有部分拼合完整】
 	 *    - undefined：表示这条消息是一个独立的完整消息。【未被截断的完整独立消息】
@@ -1210,10 +1224,6 @@ export class Cline {
 		// 是否包括当前工作目录下的文件列表
 		let includeFileDetails = true
 		while (!this.abort) {
-			if (includeFileDetails) {
-				// To Do: 在includeFileDetails == true的时候调用一次我们设计的函数。
-			}
-
 			// NOTE: 只在最开始的时候（while 的第一次循环，下面这个函数的第一层递归） 包括当前工作目录下的文件列表。
 			const didEndLoop = await this.recursivelyMakeClineRequests(nextUserContent, includeFileDetails, isNewTask)
 			includeFileDetails = false // we only need file details the first time
@@ -1297,8 +1307,7 @@ export class Cline {
 				}
 			} else {
 				// For attempt_completion, find the last completion_result message and set its checkpoint hash. This will be used to present the 'see new changes' button
-				//对于尝试完成的操作 查找最后一个 say 属性为 "completion_result" 或者 ask 属性为 "completion_result" 的聊天消息
-				// 这个消息将用于显示 "查看新更改" 按钮。
+				// Cline Message 无论是 say 还是 ask 都有 "completion_result" 这个类型
 				const lastCompletionResultMessage = findLast(
 					this.clineMessages,
 					(m) => m.say === "completion_result" || m.ask === "completion_result",
