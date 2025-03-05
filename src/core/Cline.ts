@@ -772,16 +772,31 @@ export class Cline {
 
     await this.say("text", task, images)
 
+    await this.say("checkpoint_created")
+
 		// 显示欢迎信息
 		await this.say("text", "您好，我将按照复用的方式来为您开发。首先我会搜索已有的软件项目：", images)
-		
-		// 调用Flask后端搜索GitHub仓库
+
+    // 调用Flask后端搜索GitHub仓库
 		try {
 
       let retryCount = 0
       while (retryCount < 3) {
+        let response = await fetch("http://localhost:5000/api/mid_output", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ task: task || "React应用" }),
+        })
+    
+        let data = await response.json()
+        let githubUrl = data.github_url
+        let description = data.description
+    
+        await this.say("text",description)
 
-        const response = await fetch("http://localhost:5000/api/get_repo", {
+        response = await fetch("http://localhost:5000/api/get_repo", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -793,12 +808,14 @@ export class Cline {
           throw new Error(`HTTP error! status: ${response.status}`)
         }
         
-        const data = await response.json()
-        const githubUrl = data.github_url
-        const description = data.description
+        data = await response.json()
+        githubUrl = data.github_url
+        description = data.description
+
+        await this.say("checkpoint_created")
         
         // 显示搜索结果
-        await this.say("text", `按照我的搜索，建议您考虑在${githubUrl.split("/").pop()}项目上进行修改提升`)
+        await this.say("text", `按照我的搜索，建议您考虑在${githubUrl.split("/").pop()}项目上进行修改提升，请问您是否接受我的建议？`)
         
         // 等待用户选择是否接受
         const { response: userResponse } = await this.ask("tool", JSON.stringify({
@@ -807,14 +824,23 @@ export class Cline {
         } as ClineSayTool))
 
         if (userResponse === "yesButtonClicked") {
+
+          await this.say("checkpoint_created")
+
+          await this.say("text", `请等待，正在下载项目`)
+
           // 用户接受，执行git clone
-          await this.executeCommandTool(`git clone ${githubUrl} ./temp_repo`)
+          await this.executeCommandTool(`git clone ${githubUrl} ${this.providerRef.deref()?.context.globalStorageUri.fsPath}/temp_repo`)
           // 显示项目描述
+
+          await this.say("checkpoint_created")
+
           await this.say("text", `已下载完成，以下是该项目的功能、技术栈和应用情况：
-          
   ${description}`)
 
-            await this.say("text", `请问您需要我将为您安装依赖并启动项目吗？`)
+          await this.say("checkpoint_created")
+
+          await this.say("text", `请问您需要我将为您安装依赖并启动项目吗？`)
 
           // 等待用户选择是否build
           const { response: buildResponse } = await this.ask("tool", JSON.stringify({
@@ -822,7 +848,7 @@ export class Cline {
           } as ClineSayTool))
           
           if (buildResponse === "yesButtonClicked") {
-            task = "请为./temp_repo项目安装依赖并启动"
+            task = `请为${this.providerRef.deref()?.context.globalStorageUri.fsPath}/temp_repo项目安装依赖并启动`
             images = []
           }
           break;

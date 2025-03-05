@@ -28,9 +28,21 @@ def get_repo():
     # 这里可以添加更复杂的逻辑来匹配任务和合适的仓库
     # 现在简单随机返回一个
     repo = random.choice(GITHUB_REPOS)
-    description = "This is a great repository!"
+    description = "2. 文辉对项目的summary等更加详细的项目描述"
     
     return jsonify({"github_url": repo, "description": description})
+
+@app.route('/api/mid_output', methods=['POST'])
+def mid_output():
+    """根据任务返回一个合适的GitHub仓库链接"""
+    data = request.json
+    task = data.get('task', '')
+    
+    # 这里可以添加更复杂的逻辑来匹配任务和合适的仓库
+    # 现在简单随机返回一个
+    description = "1. 小非的中间结果输出"
+    
+    return jsonify({"description": description})
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000) 
