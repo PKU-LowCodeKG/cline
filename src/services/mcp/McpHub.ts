@@ -82,6 +82,7 @@ const McpSettingsSchema = z.object({
  *
  * Model Context Protocol（MCP）是一个用于在应用程序和 LLM 之间提供上下文的标准化协议。它旨在将上下文提供与实际的 LLM 交互分离，从而简化开发流程并提高灵活性。
  * @docs https://modelcontextprotocol.io/introduction
+ * @docs MCP TypeScript SDK: https://github.com/modelcontextprotocol/typescript-sdk
  * @server https://github.com/modelcontextprotocol/servers
  */
 export class McpHub {

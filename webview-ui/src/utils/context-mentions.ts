@@ -52,6 +52,9 @@ export enum ContextMenuOptionType {
 	Git = "git",
 	// 增加 reuse 选项
 	Reuse = "reuse",
+	// 增加 repoCrawler 选项
+	RepoCrawler = "repoCrawler",
+
 	NoResults = "noResults",
 }
 
@@ -109,6 +112,8 @@ export function getContextMenuOptions(
 			{ type: ContextMenuOptionType.File },
 			// 增加 reuse 选项
 			{ type: ContextMenuOptionType.Reuse },
+			// 增加 repoCrawler 选项
+			{ type: ContextMenuOptionType.RepoCrawler },
 		]
 	}
 
@@ -120,6 +125,11 @@ export function getContextMenuOptions(
 	if ("reuse".startsWith(lowerQuery)) {
 		suggestions.push({type: ContextMenuOptionType.Reuse})
 	}
+	// 增加 repoCrawler 选项
+	if ("repoCrawler".startsWith(lowerQuery)) {
+		suggestions.push({type: ContextMenuOptionType.RepoCrawler})
+	}
+
 	if ("git".startsWith(lowerQuery)) {
 		suggestions.push({
 			type: ContextMenuOptionType.Git,

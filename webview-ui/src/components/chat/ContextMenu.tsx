@@ -57,6 +57,9 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 			// 增加 reuse 标签
 			case ContextMenuOptionType.Reuse:
 				return <span>Reuse</span>
+			// 增加 repoCrawler 标签
+			case ContextMenuOptionType.RepoCrawler:
+				return <span>Repo Crawler</span>
 			case ContextMenuOptionType.Git:
 				if (option.value) {
 					return (
@@ -122,6 +125,9 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 			// 增加 reuse 图标
 			case ContextMenuOptionType.Reuse:
 				return "file-submodule"
+			// 增加 repoCrawler 图标
+			case ContextMenuOptionType.RepoCrawler:
+				return "github"
 			default:
 				return "file"
 		}

@@ -10,7 +10,6 @@ import { diagnosticsToProblemsString } from "../../integrations/diagnostics"
 import { getLatestTerminalOutput } from "../../integrations/terminal/get-latest-output"
 import { getCommitInfo } from "../../utils/git"
 import { getWorkingState } from "../../utils/git"
-import { url } from "inspector"
 import axios from "axios"
 
 export function openMention(mention?: string): void {
@@ -234,6 +233,20 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 				parsedText += `\n\n<repo_summary>\nError fetching summary: ${error.message}\n</repo_summary>`
 			}
 		}
+
+		// 如果提及内容是 "repoCrawler"
+		else if (mention.startsWith("repoCrawler")) {
+			// 使用正则表达式从mention中提取 用户希望爬虫检索的需求
+			const req = mention.slice(11)
+			console.log(`RepoCrawler Test: ${req}`)
+
+			try {
+				const reusableRepoList = await getReusableRepoListFromReq(req)
+				parsedText += `\n\n<repo_crawler>\n${reusableRepoList}\n</repo_crawler>`
+			} catch (error) {
+				parsedText += `\n\n<repo_crawler>\nError fetching summary: ${error.message}\n</repo_crawler>`
+			}
+		}
 	}
 
 	// 如果存在URL提及内容
@@ -352,5 +365,15 @@ async function getSummaryFromRepoUrl(url: string): Promise<string> {
 ├── 访客管理
 │   ├── 获取访客列表 [16]
 │   ├── 删除访客 [17]`
+	}
+}
+
+async function getReusableRepoListFromReq(req: string): Promise<string> {
+	try {
+		const reusableRepoList = await axios.post("https://example.com/", { req })
+		return reusableRepoList.data
+	} catch (error) {
+		console.error(`Error fetching reusable repo list for req ${req}: ${error.message}`)
+		return `复用组：Reusable Repositories for Requirement ${req}`
 	}
 }

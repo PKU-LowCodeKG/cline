@@ -133,6 +133,12 @@ export class Cline {
 	private assistantMessageContent: AssistantMessageContent[] = []
 	private presentAssistantMessageLocked = false
 	private presentAssistantMessageHasPendingUpdates = false
+	/**
+	 * 【主线】记录 Cline 每一轮 API 对话中，"role"为"user"的 Anthropic 消息的"content"部分。（只有 文本、图片，不包括工具调用和工具调用结果）
+	 * 在 recursivelyMakeClineRequests 中初始化，并在该函数和该函数调用的函数中更新
+	 * （只要上一轮模型的 response 解析出来的 assistant Message 不为空）
+	 * 并在下一轮 API 对话中，作为 API 对话历史的组成部分 发送给 LLM
+	 */
 	private userMessageContent: (Anthropic.TextBlockParam | Anthropic.ImageBlockParam)[] = []
 	private userMessageContentReady = false
 	private didRejectTool = false
@@ -1762,7 +1768,9 @@ export class Cline {
 				}
 
 				/**
-				 * 将工具调用的描述、工具调用的结果 2 条 Cline Message 添加到 userMessageContent 中，并设置 didAlreadyUseTool 为 true，以防止在同一消息中使用多个工具。
+				 * 1. 将工具调用的描述、工具调用的结果 2 条 Anthropic.Messages （文本或图片）
+				 *    添加到 Cline 实例的 userMessageContent 属性
+				 * 2. 设置 didAlreadyUseTool 为 true，以防止在同一消息中使用多个工具。
 				 * @param content 工具的结果
 				 */
 				const pushToolResult = (content: ToolResponse) => {
@@ -3270,14 +3278,18 @@ export class Cline {
 		const isFirstRequest = this.clineMessages.filter((m) => m.say === "api_req_started").length === 0
 
 		// TODO: 如果我们采用了 @reuse，这里不应该 say("checkpoint_created") 和 say("api_req_started")，而是在后面直接发送 @reuse 的内容
-		let reuseFlag = false
+		let jumpFlag = false
 		for (const messageBlock of userContent) {
-			if (messageBlock.type === "text" && messageBlock.text.includes("@reuse")) {
-				reuseFlag = true
-				break
+			if (messageBlock.type === "text") {
+				if (messageBlock.text.includes("@reuse") ||
+					messageBlock.text.includes("@repoCrawler")
+				) {
+					jumpFlag = true
+					break
+				}
 			}
 		}
-		if (!reuseFlag) {
+		if (!jumpFlag) {
 
 		if (isFirstRequest) {
 			await this.say("checkpoint_created") // no hash since we need to wait for CheckpointTracker to be initialized
@@ -3329,7 +3341,7 @@ export class Cline {
 		for (const messageBlock of parsedUserContent) {
 			if (messageBlock.type === "text" && messageBlock.text.includes("<repo_summary>")) {
 				await this.say("text", messageBlock.text)
-				// 此时，由于 userContent 中的 @reuse 已经被替换为 <repo_summary>，所以上面的 reuseFlag 在下一次循环中不会被设置为 true
+				// 此时，由于 userContent 中的 @reuse 已经被替换为 <repo_summary>，所以上面的 jumpFlag 在下一次循环中不会被设置为 true
 				// 返回 false 会使得下一轮 userContent 变为
 				// nextUserContent = [
 				// 	{
@@ -3344,6 +3356,12 @@ export class Cline {
 				// JSON.stringify() 把这俩作为 request 作为上面 "api_req_started" 的内容，覆盖了之前的内容
 				// --- 上面的 API 消息会得到 “对不起,我之前没有使用工具……”之类的回复，以及 <plan_mode_response> 工具调用
 				// updateApiReqMsg() 会更新上面 "api_req_started" 的指标
+				return false
+			}
+			if (messageBlock.type === "text" && messageBlock.text.includes("<repo_crawler>")) {
+				await this.say("text", messageBlock.text)
+				// TODO 目前，这里直接返回的话，可能会导致 Cline 跳过对话后空转，导致对话提前终止
+				// 如果说这里直接再 ask 一下，那么前面的 api_request 就不用跳过，这里也不用直接返回了
 				return false
 			}
 		}
