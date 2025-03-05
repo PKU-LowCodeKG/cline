@@ -424,6 +424,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	 * 向与当前视图关联的 Webview 发送一个可序列化为 JSON 的消息。
 	 * 1. 前端需要监听 "message" 事件
 	 * 2. 消息是异步发送的，确保不会阻塞主线程。
+	 * 前端通过监听 "message" 事件，在 WebView 内接收来自插件的消息。（见 webview-ui\src\context\ExtensionStateContext.tsx）
 	 * @param message 要发送的消息，必须是一个可序列化为 JSON 的对象。
 	 * @returns 返回一个 Promise，表示消息发送的异步操作。
 	 */

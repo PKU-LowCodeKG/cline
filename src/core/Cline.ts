@@ -1225,6 +1225,7 @@ export class Cline {
 		let includeFileDetails = true
 		while (!this.abort) {
 			// NOTE: 只在最开始的时候（while 的第一次循环，下面这个函数的第一层递归） 包括当前工作目录下的文件列表。
+			console.log("开始递归请求时的 userContent", nextUserContent)
 			const didEndLoop = await this.recursivelyMakeClineRequests(nextUserContent, includeFileDetails, isNewTask)
 			includeFileDetails = false // we only need file details the first time
 
@@ -3290,8 +3291,8 @@ export class Cline {
 		let jumpFlag = false
 		for (const messageBlock of userContent) {
 			if (messageBlock.type === "text") {
-				if (messageBlock.text.includes("@reuse") ||
-					messageBlock.text.includes("@repoCrawler")
+				if (messageBlock.text.includes("@reuse") 
+				|| messageBlock.text.includes("@repoCrawler")
 				) {
 					jumpFlag = true
 					break
@@ -3346,11 +3347,12 @@ export class Cline {
 		// add environment details as its own text block, separate from tool results
 		userContent.push({ type: "text", text: environmentDetails })
 
-		// 如果用户内容中包含 "<repo_summary>"，则直接发送 "<repo_summary>" 的内容
-		for (const messageBlock of parsedUserContent) {
+		for (const messageBlock of userContent) {
+			// 如果用户内容中包含 "<repo_summary>"，则直接发送 "<repo_summary>" 的内容
 			if (messageBlock.type === "text" && messageBlock.text.includes("<repo_summary>")) {
+				// TODO: 后续如果需要的话，reuse 部分要向 repo_crawler 那样改，现在这样是有问题的
 				await this.say("text", messageBlock.text)
-				// 此时，由于 userContent 中的 @reuse 已经被替换为 <repo_summary>，所以上面的 jumpFlag 在下一次循环中不会被设置为 true
+				// 此时，由于 userContent 中的 @reuse 已经被替换，所以上面的 jumpFlag 在下一次循环中不会被设置为 true
 				// 返回 false 会使得下一轮 userContent 变为
 				// nextUserContent = [
 				// 	{
@@ -3368,10 +3370,22 @@ export class Cline {
 				return false
 			}
 			if (messageBlock.type === "text" && messageBlock.text.includes("<repo_crawler>")) {
+				console.log("爬虫工具调用")
+				// 如果用户内容中包含 "<repo_crawler>"，则需要清除掉 "<repo_crawler>" 避免重复匹配
+				let newContent = messageBlock.text.replaceAll(/(<repo_crawler>|<\/repo_crawler>)/g, "")
+				messageBlock.text = newContent
 				await this.say("text", messageBlock.text)
-				// TODO 目前，这里直接返回的话，可能会导致 Cline 跳过对话后空转，导致对话提前终止
-				// 如果说这里直接再 ask 一下，那么前面的 api_request 就不用跳过，这里也不用直接返回了
-				return false
+				// 这里再提问一下用户，让用户选择一个项目进行复用
+				const { text, images } = await this.ask("followup", "检索到的项目已经展示结束，请您选择一个项目进行复用。在您选择后，我们会自动下载项目")
+				await this.say("user_feedback", text ?? "", images)
+				// 接下来需要替换 <task> 标签中的任务文本。
+				// 一般默认 <repo_crawler> 所在的块就是 <task> 所在的块，但是之后还是内层循环查找一下比较好
+				let newTask = `<task>\n${text}。请使用 git clone 命令下载这个仓库，并使用 code 命令，在当前 VS Code 工作区中打开这个仓库\n</task>`
+				newContent = messageBlock.text.replace(/<task>[\s\S]*<\/task>/, newTask);
+				messageBlock.text = newContent
+				// 用新的 userContent 来递归
+				await this.recursivelyMakeClineRequests(userContent, includeFileDetails, isNewTask)
+				return true
 			}
 		}
 
@@ -3585,6 +3599,7 @@ export class Cline {
 			// now add to apiconversationhistory
 			// need to save assistant responses to file before proceeding to tool use since user can exit at any moment and we wouldn't be able to save the assistant's response
 			let didEndLoop = false
+			let state = 0
 			// NOTE: assistantMessage 此时是 原始的 LLM response 加上了 3 种说明之一（this.abort、this.didRejectTool、this.didAlreadyUseTool）
 			// - 在之前处理 LLM response 的流式结果时，this.abort 为 true，则利用 abortStream 中加入对话历史
 			// - 否则，在下面 将其加入对话历史
