@@ -163,11 +163,14 @@ export interface ClineSayTool {
 		| "listFilesRecursive"
 		| "listCodeDefinitionNames"
 		| "searchFiles"
+		| "acceptGithubRepo"
+		| "buildSystem"
 	path?: string
 	diff?: string
 	content?: string
 	regex?: string
 	filePattern?: string
+	url?: string
 }
 
 // must keep in sync with system prompt

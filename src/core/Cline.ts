@@ -770,7 +770,78 @@ export class Cline {
 
 		await this.providerRef.deref()?.postStateToWebview()
 
-		await this.say("text", task, images)
+    await this.say("text", task, images)
+
+		// 显示欢迎信息
+		await this.say("text", "您好，我将按照复用的方式来为您开发。首先我会搜索已有的软件项目：", images)
+		
+		// 调用Flask后端搜索GitHub仓库
+		try {
+
+      let retryCount = 0
+      while (retryCount < 3) {
+
+        const response = await fetch("http://localhost:5000/api/get_repo", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ task: task || "React应用" }),
+        })
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
+        
+        const data = await response.json()
+        const githubUrl = data.github_url
+        const description = data.description
+        
+        // 显示搜索结果
+        await this.say("text", `按照我的搜索，建议您考虑在${githubUrl.split("/").pop()}项目上进行修改提升`)
+        
+        // 等待用户选择是否接受
+        const { response: userResponse } = await this.ask("tool", JSON.stringify({
+          tool: "acceptGithubRepo",
+          url: githubUrl
+        } as ClineSayTool))
+
+        if (userResponse === "yesButtonClicked") {
+          // 用户接受，执行git clone
+          await this.executeCommandTool(`git clone ${githubUrl} ./temp_repo`)
+          // 显示项目描述
+          await this.say("text", `已下载完成，以下是该项目的功能、技术栈和应用情况：
+          
+  ${description}`)
+
+            await this.say("text", `请问您需要我将为您安装依赖并启动项目吗？`)
+
+          // 等待用户选择是否build
+          const { response: buildResponse } = await this.ask("tool", JSON.stringify({
+            tool: "buildSystem"
+          } as ClineSayTool))
+          
+          if (buildResponse === "yesButtonClicked") {
+            task = "请为./temp_repo项目安装依赖并启动"
+            images = []
+          }
+          break;
+        } 
+        else
+        {
+          await this.say("text", `您拒绝了，让我们尝试另一个选项`)
+        }
+
+        retryCount++
+        if (retryCount >= 3) {
+          await this.say("text", "已尝试3次搜索，将不再复用已有程序")
+        }
+      }
+		} catch (error) {
+			console.error("搜索GitHub仓库失败:", error)
+			// 如果搜索失败，继续正常的任务流程
+      await this.say("text", "搜索GitHub仓库失败")
+		}
 
 		this.isInitialized = true
 
