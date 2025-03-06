@@ -18,6 +18,7 @@ import * as vscode from "vscode"
 import { z } from "zod"
 import { ClineProvider, GlobalFileNames } from "../../core/webview/ClineProvider"
 import {
+	DEFAULT_MCP_TIMEOUT_SECONDS,
 	McpMode,
 	McpResource,
 	McpResourceResponse,
@@ -25,11 +26,11 @@ import {
 	McpServer,
 	McpTool,
 	McpToolCallResponse,
+	MIN_MCP_TIMEOUT_SECONDS,
 } from "../../shared/mcp"
 import { fileExistsAtPath } from "../../utils/fs"
 import { arePathsEqual } from "../../utils/path"
-
-/** MCP 连接对象，包括 Cline 自定义的 MCP 服务器、客户端和传输。 */
+import { secondsToMs } from "../../utils/time"
 export type McpConnection = {
 	/** Cline 自定义的 MCP 服务器，不是官方的 McpServer 类型 */
 	server: McpServer
@@ -39,19 +40,20 @@ export type McpConnection = {
 
 const AutoApproveSchema = z.array(z.string()).default([])
 
-// StdioServerParameters
 /**
  * Cline 定义的 StdioClientTransport 配置对象范式
  *
  * 官方的接口是 StdioServerParameters，Cline 自定义了这个 数据结构范式，
  * 用 safeParse 解析 StdioServerParameters 是否符合这个预期的数据结构（可选字段可以没有）
  */
+
 const StdioConfigSchema = z.object({
 	command: z.string(),
 	args: z.array(z.string()).optional(),
 	env: z.record(z.string()).optional(),
 	autoApprove: AutoApproveSchema.optional(),
 	disabled: z.boolean().optional(),
+	timeout: z.number().min(MIN_MCP_TIMEOUT_SECONDS).optional().default(DEFAULT_MCP_TIMEOUT_SECONDS),
 })
 
 /**
@@ -313,28 +315,6 @@ export class McpHub {
 			}
 			transport.start = async () => {} // No-op now, .connect() won't fail
 
-			// // Set up notification handlers
-			// client.setNotificationHandler(
-			// 	// @ts-ignore-next-line
-			// 	{ method: "notifications/tools/list_changed" },
-			// 	async () => {
-			// 		console.log(`Tools changed for server: ${name}`)
-			// 		connection.server.tools = await this.fetchTools(name)
-			// 		await this.notifyWebviewOfServerChanges()
-			// 	},
-			// )
-
-			// client.setNotificationHandler(
-			// 	// @ts-ignore-next-line
-			// 	{ method: "notifications/resources/list_changed" },
-			// 	async () => {
-			// 		console.log(`Resources changed for server: ${name}`)
-			// 		connection.server.resources = await this.fetchResources(name)
-			// 		connection.server.resourceTemplates = await this.fetchResourceTemplates(name)
-			// 		await this.notifyWebviewOfServerChanges()
-			// 	},
-			// )
-
 			// Connect
 			await client.connect(transport)
 			connection.server.status = "connected"
@@ -419,10 +399,6 @@ export class McpHub {
 		const connection = this.connections.find((conn) => conn.server.name === name)
 		if (connection) {
 			try {
-				// connection.client.removeNotificationHandler("notifications/tools/list_changed")
-				// connection.client.removeNotificationHandler("notifications/resources/list_changed")
-				// connection.client.removeNotificationHandler("notifications/stderr")
-				// connection.client.removeNotificationHandler("notifications/stderr")
 				await connection.transport.close()
 				await connection.client.close()
 			} catch (error) {
@@ -679,6 +655,7 @@ export class McpHub {
 		if (connection.server.disabled) {
 			throw new Error(`Server "${serverName}" is disabled`)
 		}
+
 		return await connection.client.request(
 			{
 				method: "resources/read",
@@ -702,6 +679,16 @@ export class McpHub {
 			throw new Error(`Server "${serverName}" is disabled and cannot be used`)
 		}
 
+		let timeout = secondsToMs(DEFAULT_MCP_TIMEOUT_SECONDS) // sdk expects ms
+
+		try {
+			const config = JSON.parse(connection.server.config)
+			const parsedConfig = StdioConfigSchema.parse(config)
+			timeout = secondsToMs(parsedConfig.timeout)
+		} catch (error) {
+			console.error(`Failed to parse timeout configuration for server ${serverName}: ${error}`)
+		}
+
 		return await connection.client.request(
 			{
 				method: "tools/call",
@@ -711,6 +698,9 @@ export class McpHub {
 				},
 			},
 			CallToolResultSchema,
+			{
+				timeout,
+			},
 		)
 	}
 
@@ -736,7 +726,6 @@ export class McpHub {
 				autoApprove.splice(toolIndex, 1)
 			}
 
-			// Write updated config back to file
 			await fs.writeFile(settingsPath, JSON.stringify(config, null, 2))
 
 			// Update the tools list to reflect the change
@@ -774,6 +763,42 @@ export class McpHub {
 		} catch (error) {
 			vscode.window.showErrorMessage(
 				`Failed to delete MCP server: ${error instanceof Error ? error.message : String(error)}`,
+			)
+			throw error
+		}
+	}
+
+	public async updateServerTimeout(serverName: string, timeout: number): Promise<void> {
+		try {
+			// Validate timeout against schema
+			const setConfigResult = StdioConfigSchema.shape.timeout.safeParse(timeout)
+			if (!setConfigResult.success) {
+				throw new Error(`Invalid timeout value: ${timeout}. Must be at minimum ${MIN_MCP_TIMEOUT_SECONDS} seconds.`)
+			}
+
+			const settingsPath = await this.getMcpSettingsFilePath()
+			const content = await fs.readFile(settingsPath, "utf-8")
+			const config = JSON.parse(content)
+
+			if (!config.mcpServers?.[serverName]) {
+				throw new Error(`Server "${serverName}" not found in settings`)
+			}
+
+			config.mcpServers[serverName] = {
+				...config.mcpServers[serverName],
+				timeout,
+			}
+
+			await fs.writeFile(settingsPath, JSON.stringify(config, null, 2))
+
+			await this.updateServerConnections(config.mcpServers)
+		} catch (error) {
+			console.error("Failed to update server timeout:", error)
+			if (error instanceof Error) {
+				console.error("Error details:", error.message, error.stack)
+			}
+			vscode.window.showErrorMessage(
+				`Failed to update server timeout: ${error instanceof Error ? error.message : String(error)}`,
 			)
 			throw error
 		}

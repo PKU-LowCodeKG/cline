@@ -1,37 +1,41 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import axios from "axios"
-import fs from "fs/promises"
-import os from "os"
 import crypto from "crypto"
 import { execa } from "execa"
+import fs from "fs/promises"
+import os from "os"
 import pWaitFor from "p-wait-for"
 import * as path from "path"
 import * as vscode from "vscode"
 import { buildApiHandler } from "../../api"
 import { downloadTask } from "../../integrations/misc/export-markdown"
 import { openFile, openImage } from "../../integrations/misc/open-file"
+import { fetchOpenGraphData, isImageUrl } from "../../integrations/misc/link-preview"
 import { selectImages } from "../../integrations/misc/process-images"
 import { getTheme } from "../../integrations/theme/getTheme"
 import WorkspaceTracker from "../../integrations/workspace/WorkspaceTracker"
 import { McpHub } from "../../services/mcp/McpHub"
-import { McpDownloadResponse, McpMarketplaceCatalog, McpMarketplaceItem, McpServer } from "../../shared/mcp"
-import { FirebaseAuthManager, UserInfo } from "../../services/auth/FirebaseAuthManager"
+import { UserInfo } from "../../shared/UserInfo"
 import { ApiProvider, ModelInfo } from "../../shared/api"
 import { findLast } from "../../shared/array"
-import { ExtensionMessage, ExtensionState, Platform } from "../../shared/ExtensionMessage"
+import { AutoApprovalSettings, DEFAULT_AUTO_APPROVAL_SETTINGS } from "../../shared/AutoApprovalSettings"
+import { BrowserSettings, DEFAULT_BROWSER_SETTINGS } from "../../shared/BrowserSettings"
+import { ChatContent } from "../../shared/ChatContent"
+import { ChatSettings, DEFAULT_CHAT_SETTINGS } from "../../shared/ChatSettings"
+import { ExtensionMessage, ExtensionState, Invoke, Platform } from "../../shared/ExtensionMessage"
 import { HistoryItem } from "../../shared/HistoryItem"
+import { McpDownloadResponse, McpMarketplaceCatalog, McpServer } from "../../shared/mcp"
 import { ClineCheckpointRestore, WebviewMessage } from "../../shared/WebviewMessage"
 import { fileExistsAtPath } from "../../utils/fs"
+import { searchCommits } from "../../utils/git"
 import { Cline } from "../Cline"
 import { openMention } from "../mentions"
 import { getNonce } from "./getNonce"
 import { getUri } from "./getUri"
-import { AutoApprovalSettings, DEFAULT_AUTO_APPROVAL_SETTINGS } from "../../shared/AutoApprovalSettings"
-import { BrowserSettings, DEFAULT_BROWSER_SETTINGS } from "../../shared/BrowserSettings"
-import { ChatSettings, DEFAULT_CHAT_SETTINGS } from "../../shared/ChatSettings"
-import { DIFF_VIEW_URI_SCHEME } from "../../integrations/editor/DiffViewProvider"
-import { searchCommits } from "../../utils/git"
-import { ChatContent } from "../../shared/ChatContent"
+import { telemetryService } from "../../services/telemetry/TelemetryService"
+import { TelemetrySetting } from "../../shared/TelemetrySetting"
+import { cleanupLegacyCheckpoints } from "../../integrations/checkpoints/CheckpointMigration"
+import CheckpointTracker from "../../integrations/checkpoints/CheckpointTracker"
 
 /*
 https://github.com/microsoft/vscode-webview-ui-toolkit-samples/blob/main/default/weather-webview/src/providers/WeatherViewProvider.ts
@@ -41,13 +45,12 @@ https://github.com/KumarVariable/vscode-extension-sidebar-html/blob/master/src/c
 /**
  * `vscode.ExtensionContext.secrets` 是 SecretStorage 接口类型的实例，它允许扩展开发者 存储和检索敏感信息。
  * SecretKey 是 Cline 定义的敏感信息 key 的类型。
- */
-/**
  * 定义了一系列敏感信息的键名，用于标识不同的API密钥或认证令牌。
  * 这些密钥在系统配置和请求认证中被使用。
  */
 type SecretKey =
 	| "apiKey"
+	| "clineApiKey"
 	| "openRouterApiKey"
 	| "awsAccessKey"
 	| "awsSecretKey"
@@ -61,8 +64,11 @@ type SecretKey =
 	| "qwenApiKey"
 	| "mistralApiKey"
 	| "liteLlmApiKey"
-	| "authToken"
 	| "authNonce"
+	| "asksageApiKey"
+	| "xaiApiKey"
+
+
 /**
  * 定义了全局状态的键名集合，用于标识系统配置中的各项设置。
  * 这些键名涵盖了API提供商、模型ID、区域设置等配置项。
@@ -72,6 +78,7 @@ type GlobalStateKey =
 	| "apiModelId"
 	| "awsRegion"
 	| "awsUseCrossRegionInference"
+	| "awsBedrockUsePromptCache"
 	| "awsProfile"
 	| "awsUseProfile"
 	| "vertexProjectId"
@@ -84,6 +91,7 @@ type GlobalStateKey =
 	| "openAiModelInfo"
 	| "ollamaModelId"
 	| "ollamaBaseUrl"
+	| "ollamaApiOptionsCtxNum"
 	| "lmStudioModelId"
 	| "lmStudioBaseUrl"
 	| "anthropicBaseUrl"
@@ -97,6 +105,7 @@ type GlobalStateKey =
 	| "userInfo"
 	| "previousModeApiProvider"
 	| "previousModeModelId"
+	| "previousModeThinkingBudgetTokens"
 	| "previousModeModelInfo"
 	| "liteLlmBaseUrl"
 	| "liteLlmModelId"
@@ -104,6 +113,9 @@ type GlobalStateKey =
 	| "requestyModelId"
 	| "togetherModelId"
 	| "mcpMarketplaceCatalog"
+	| "telemetrySetting"
+	| "asksageApiUrl"
+	| "thinkingBudgetTokens"
 
 /**
  * Cline 的全局文件名
@@ -151,8 +163,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	// workspaceTracker和mcpHub为可选属性 分别表示工作区跟踪器与MCP中心
 	workspaceTracker?: WorkspaceTracker
 	mcpHub?: McpHub
-	// authManager表示认证管理器
-	private authManager: FirebaseAuthManager
 	private latestAnnouncementId = "feb-19-2025" // update to some unique identifier when we add a new announcement
 
 	/**
@@ -175,8 +185,11 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		this.workspaceTracker = new WorkspaceTracker(this)
 		// 初始化McpHub，用于处理与MCP（Microservice Communication Protocol）相关的操作
 		this.mcpHub = new McpHub(this)
-		// 初始化FirebaseAuthManager，用于处理Firebase身份验证相关的操作
-		this.authManager = new FirebaseAuthManager(this)
+
+		// Clean up legacy checkpoints
+		cleanupLegacyCheckpoints(this.context.globalStorageUri.fsPath, this.outputChannel).catch((error) => {
+			console.error("Failed to cleanup legacy checkpoints:", error)
+		})
 	}
 
 	/*
@@ -216,11 +229,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		// 释放 mcpHub 并设置为 undefined
 		this.mcpHub?.dispose()
 		this.mcpHub = undefined
-
-		// 释放身份验证管理器
-		this.authManager.dispose()
-
-		// 记录所有资源已释放的日志
 		this.outputChannel.appendLine("Disposed all disposables")
 
 		// 从活动实例集合中删除当前实例
@@ -230,22 +238,16 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	// 处理用户登出的方法
 	async handleSignOut() {
 		try {
-			// 调用authManager的signOut方法进行登出操作
-			await this.authManager.signOut()
-			// 显示登出成功的提示信息
+			await this.storeSecret("clineApiKey", undefined)
+			await this.updateGlobalState("apiProvider", "openrouter")
+			await this.postStateToWebview()
 			vscode.window.showInformationMessage("Successfully logged out of Cline")
 		} catch (error) {
 			// 如果登出失败，显示错误信息
 			vscode.window.showErrorMessage("Logout failed")
 		}
 	}
-	/**
-	 * 以 "authToken" 为 key，将认证令牌存储到安全存储 SecretStorage 中
-	 * @param {string} [token] - 可选参数，表示要存储的认证令牌。如果未提供，则存储 `undefined`。
-	 */
-	async setAuthToken(token?: string) {
-		await this.storeSecret("authToken", token)
-	}
+
 	/**
 	 * 以 "userInfo" 为 key，设置并更新全局状态的用户信息。
 	 *
@@ -269,18 +271,13 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		// 从 activeInstances 中查找最后一个可见的实例
 		return findLast(Array.from(this.activeInstances), (instance) => instance.view?.visible === true)
 	}
+
 	/**
 	 * 【主线】解析和配置 VSCode 的 Webview 视图。
 	 * 主要功能包括：设置 Webview 的选项和 HTML 内容、监听消息、处理视图可见性变化、监听视图关闭事件、监听主题颜色变化、清除任务状态。
-	 * @param webviewView
+	 * @param webviewView 表示一个 Webview 视图或面板
 	 */
-	resolveWebviewView(
-		// 表示一个 Webview 视图或面板
-		webviewView: vscode.WebviewView | vscode.WebviewPanel,
-		//context: vscode.WebviewViewResolveContext<unknown>, used to recreate a deallocated webview, but we don't need this since we use retainContextWhenHidden
-		//token: vscode.CancellationToken
-	): void | Thenable<void> {
-		// 在输出通道中记录正在解析 webview 视图
+	async resolveWebviewView(webviewView: vscode.WebviewView | vscode.WebviewPanel) {
 		this.outputChannel.appendLine("Resolving webview view")
 		this.view = webviewView
 
@@ -293,7 +290,10 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		}
 
 		// 设置 webview 的 HTML 内容
-		webviewView.webview.html = this.getHtmlContent(webviewView.webview)
+		webviewView.webview.html =
+			this.context.extensionMode === vscode.ExtensionMode.Development
+				? await this.getHMRHtmlContent(webviewView.webview)
+				: this.getHtmlContent(webviewView.webview)
 
 		// Sets up an event listener to listen for messages passed from the webview view context
 		// and executes code based on the message that is received
@@ -347,8 +347,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			this.disposables,
 		)
 
-		// Listen for when color changes
-		// 监听主题颜色配置变化的事件
+		// Listen for configuration changes
 		vscode.workspace.onDidChangeConfiguration(
 			async (e) => {
 				if (e && e.affectsConfiguration("workbench.colorTheme")) {
@@ -358,6 +357,10 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						type: "theme",
 						text: JSON.stringify(await getTheme()),
 					})
+				}
+				if (e && e.affectsConfiguration("cline.mcpMarketplace.enabled")) {
+					// Update state when marketplace tab setting changes
+					await this.postStateToWebview()
 				}
 			},
 			null,
@@ -450,14 +453,12 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		// Get the local path to main script run in the webview,
 		// then convert it to a uri we can use in the webview.
 
-		// The CSS file from the React build output
 		// 获取在 Webview 中运行的主脚本的本地路径，并将其转换为可在 Webview 中使用的 URI。
 
-		// 从 React 构建输出中获取 CSS 文件
-		const stylesUri = getUri(webview, this.context.extensionUri, ["webview-ui", "build", "static", "css", "main.css"])
+		// The CSS file from the React build output
+		const stylesUri = getUri(webview, this.context.extensionUri, ["webview-ui", "build", "assets", "index.css"])
 		// The JS file from the React build output
-		// 从 React 构建输出中获取 JS 文件
-		const scriptUri = getUri(webview, this.context.extensionUri, ["webview-ui", "build", "static", "js", "main.js"])
+		const scriptUri = getUri(webview, this.context.extensionUri, ["webview-ui", "build", "assets", "index.js"])
 
 		// The codicon font from the React build output
 		// https://github.com/microsoft/vscode-extension-samples/blob/main/webview-codicons-sample/src/extension.ts
@@ -505,18 +506,92 @@ export class ClineProvider implements vscode.WebviewViewProvider {
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width,initial-scale=1,shrink-to-fit=no">
             <meta name="theme-color" content="#000000">
-            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource} https: data:; script-src 'nonce-${nonce}';">
             <link rel="stylesheet" type="text/css" href="${stylesUri}">
-			<link href="${codiconsUri}" rel="stylesheet" />
+            <link href="${codiconsUri}" rel="stylesheet" />
+						<meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src https://*.posthog.com https://*.firebaseauth.com https://*.firebaseio.com https://*.googleapis.com https://*.firebase.com; font-src ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource} https: data:; script-src 'nonce-${nonce}' 'unsafe-eval';">
             <title>Cline</title>
           </head>
           <body>
             <noscript>You need to enable JavaScript to run this app.</noscript>
             <div id="root"></div>
-            <script nonce="${nonce}" src="${scriptUri}"></script>
+            <script type="module" nonce="${nonce}" src="${scriptUri}"></script>
           </body>
         </html>
       `
+	}
+
+	/**
+	 * Connects to the local Vite dev server to allow HMR, with fallback to the bundled assets
+	 *
+	 * @param webview A reference to the extension webview
+	 * @returns A template string literal containing the HTML that should be
+	 * rendered within the webview panel
+	 */
+	private async getHMRHtmlContent(webview: vscode.Webview): Promise<string> {
+		const localPort = 25463
+		const localServerUrl = `localhost:${localPort}`
+
+		// Check if local dev server is running.
+		try {
+			await axios.get(`http://${localServerUrl}`)
+		} catch (error) {
+			vscode.window.showErrorMessage(
+				"Cline: Local webview dev server is not running, HMR will not work. Please run 'npm run dev:webview' before launching the extension to enable HMR. Using bundled assets.",
+			)
+
+			return this.getHtmlContent(webview)
+		}
+
+		const nonce = getNonce()
+		const stylesUri = getUri(webview, this.context.extensionUri, ["webview-ui", "build", "assets", "index.css"])
+		const codiconsUri = getUri(webview, this.context.extensionUri, [
+			"node_modules",
+			"@vscode",
+			"codicons",
+			"dist",
+			"codicon.css",
+		])
+
+		const scriptEntrypoint = "src/main.tsx"
+		const scriptUri = `http://${localServerUrl}/${scriptEntrypoint}`
+
+		const reactRefresh = /*html*/ `
+			<script nonce="${nonce}" type="module">
+				import RefreshRuntime from "http://${localServerUrl}/@react-refresh"
+				RefreshRuntime.injectIntoGlobalHook(window)
+				window.$RefreshReg$ = () => {}
+				window.$RefreshSig$ = () => (type) => type
+				window.__vite_plugin_react_preamble_installed__ = true
+			</script>
+		`
+
+		const csp = [
+			"default-src 'none'",
+			`font-src ${webview.cspSource}`,
+			`style-src ${webview.cspSource} 'unsafe-inline' https://* http://${localServerUrl} http://0.0.0.0:${localPort}`,
+			`img-src ${webview.cspSource} https: data:`,
+			`script-src 'unsafe-eval' https://* http://${localServerUrl} http://0.0.0.0:${localPort} 'nonce-${nonce}'`,
+			`connect-src https://* ws://${localServerUrl} ws://0.0.0.0:${localPort} http://${localServerUrl} http://0.0.0.0:${localPort}`,
+		]
+
+		return /*html*/ `
+			<!DOCTYPE html>
+			<html lang="en">
+				<head>
+					<meta charset="utf-8">
+					<meta name="viewport" content="width=device-width,initial-scale=1,shrink-to-fit=no">
+					<meta http-equiv="Content-Security-Policy" content="${csp.join("; ")}">
+					<link rel="stylesheet" type="text/css" href="${stylesUri}">
+					<link href="${codiconsUri}" rel="stylesheet" />
+					<title>Cline</title>
+				</head>
+				<body>
+					<div id="root"></div>
+					${reactRefresh}
+					<script type="module" src="${scriptUri}"></script>
+				</body>
+			</html>
+		`
 	}
 
 	/**
@@ -532,7 +607,10 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		webview.onDidReceiveMessage(
 			async (message: WebviewMessage) => {
 				switch (message.type) {
-					/** /src/shared/WebviewMessage.ts 中的 WebviewMessage.type */
+					case "authStateChanged":
+						await this.setUserInfo(message.user || undefined)
+						await this.postStateToWebview()
+						break
 					case "webviewDidLaunch":
 						// Webview 启动时，发送状态信息到 Webview
 						this.postStateToWebview()
@@ -583,6 +661,12 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 							}
 						})
 
+						// If user already opted in to telemetry, enable telemetry service
+						this.getStateToPostToWebview().then((state) => {
+							const { telemetrySetting } = state
+							const isOptedIn = telemetrySetting === "enabled"
+							telemetryService.updateTelemetryState(isOptedIn)
+						})
 						break
 					// 【主线】前端发送的消息类型为 "newTask" 时，初始化新的任务
 					case "newTask":
@@ -610,6 +694,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 								awsSessionToken,
 								awsRegion,
 								awsUseCrossRegionInference,
+								awsBedrockUsePromptCache,
 								awsProfile,
 								awsUseProfile,
 								vertexProjectId,
@@ -620,6 +705,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 								openAiModelInfo,
 								ollamaModelId,
 								ollamaBaseUrl,
+								ollamaApiOptionsCtxNum,
 								lmStudioModelId,
 								lmStudioBaseUrl,
 								anthropicBaseUrl,
@@ -640,6 +726,11 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 								liteLlmModelId,
 								liteLlmApiKey,
 								qwenApiLine,
+								asksageApiKey,
+								asksageApiUrl,
+								xaiApiKey,
+								thinkingBudgetTokens,
+								clineApiKey,
 							} = message.apiConfiguration
 							// 更新全局状态和密钥
 							await this.updateGlobalState("apiProvider", apiProvider)
@@ -651,6 +742,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 							await this.storeSecret("awsSessionToken", awsSessionToken)
 							await this.updateGlobalState("awsRegion", awsRegion)
 							await this.updateGlobalState("awsUseCrossRegionInference", awsUseCrossRegionInference)
+							await this.updateGlobalState("awsBedrockUsePromptCache", awsBedrockUsePromptCache)
 							await this.updateGlobalState("awsProfile", awsProfile)
 							await this.updateGlobalState("awsUseProfile", awsUseProfile)
 							await this.updateGlobalState("vertexProjectId", vertexProjectId)
@@ -661,6 +753,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 							await this.updateGlobalState("openAiModelInfo", openAiModelInfo)
 							await this.updateGlobalState("ollamaModelId", ollamaModelId)
 							await this.updateGlobalState("ollamaBaseUrl", ollamaBaseUrl)
+							await this.updateGlobalState("ollamaApiOptionsCtxNum", ollamaApiOptionsCtxNum)
 							await this.updateGlobalState("lmStudioModelId", lmStudioModelId)
 							await this.updateGlobalState("lmStudioBaseUrl", lmStudioBaseUrl)
 							await this.updateGlobalState("anthropicBaseUrl", anthropicBaseUrl)
@@ -672,6 +765,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 							await this.storeSecret("qwenApiKey", qwenApiKey)
 							await this.storeSecret("mistralApiKey", mistralApiKey)
 							await this.storeSecret("liteLlmApiKey", liteLlmApiKey)
+							await this.storeSecret("xaiApiKey", xaiApiKey)
 							await this.updateGlobalState("azureApiVersion", azureApiVersion)
 							await this.updateGlobalState("openRouterModelId", openRouterModelId)
 							await this.updateGlobalState("openRouterModelInfo", openRouterModelInfo)
@@ -681,7 +775,10 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 							await this.updateGlobalState("qwenApiLine", qwenApiLine)
 							await this.updateGlobalState("requestyModelId", requestyModelId)
 							await this.updateGlobalState("togetherModelId", togetherModelId)
-							// 更新 Cline 实例的 API 处理器
+							await this.storeSecret("asksageApiKey", asksageApiKey)
+							await this.updateGlobalState("asksageApiUrl", asksageApiUrl)
+							await this.updateGlobalState("thinkingBudgetTokens", thinkingBudgetTokens)
+							await this.storeSecret("clineApiKey", clineApiKey)
 							if (this.cline) {
 								this.cline.api = buildApiHandler(message.apiConfiguration)
 							}
@@ -808,6 +905,17 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						// 打开指定路径的图片
 						openImage(message.text!)
 						break
+					case "openInBrowser":
+						if (message.url) {
+							vscode.env.openExternal(vscode.Uri.parse(message.url))
+						}
+						break
+					case "fetchOpenGraphData":
+						this.fetchOpenGraphData(message.text!)
+						break
+					case "checkIsImageUrl":
+						this.checkIsImageUrl(message.text!)
+						break
 					case "openFile":
 						// 打开指定路径的文件
 						openFile(message.text!)
@@ -856,10 +964,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 					case "getLatestState":
 						// 获取并发送最新状态到 Webview
 						await this.postStateToWebview()
-						break
-					case "subscribeEmail":
-						// 处理邮箱订阅
-						this.subscribeEmail(message.text)
 						break
 					case "accountLoginClicked": {
 						// 处理账户登录点击事件
@@ -1012,6 +1116,16 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						}
 						break
 					}
+					case "updateMcpTimeout": {
+						try {
+							if (message.serverName && message.timeout) {
+								await this.mcpHub?.updateServerTimeout(message.serverName, message.timeout)
+							}
+						} catch (error) {
+							console.error(`Failed to update timeout for server ${message.serverName}:`, error)
+						}
+						break
+					}
 					case "openExtensionSettings": {
 						// 打开扩展设置页面
 						const settingsFilter = message.text || ""
@@ -1019,6 +1133,31 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 							"workbench.action.openSettings",
 							`@ext:saoudrizwan.claude-dev ${settingsFilter}`.trim(), // trim whitespace if no settings filter
 						)
+						break
+					}
+					case "invoke": {
+						if (message.text) {
+							await this.postMessageToWebview({
+								type: "invoke",
+								invoke: message.text as Invoke,
+							})
+						}
+						break
+					}
+					// telemetry
+					case "openSettings": {
+						await this.postMessageToWebview({
+							type: "action",
+							action: "settingsButtonClicked",
+						})
+						break
+					}
+					case "telemetrySetting": {
+						const telemetrySetting = message.text as TelemetrySetting
+						await this.updateGlobalState("telemetrySetting", telemetrySetting)
+						const isOptedIn = telemetrySetting === "enabled"
+						telemetryService.updateTelemetryState(isOptedIn)
+						await this.postStateToWebview()
 						break
 					}
 					// Add more switch case statements here as more webview message commands
@@ -1033,24 +1172,31 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	async togglePlanActModeWithChatSettings(chatSettings: ChatSettings, chatContent?: ChatContent) {
 		const didSwitchToActMode = chatSettings.mode === "act"
 
+		// Capture mode switch telemetry | Capture regardless of if we know the taskId
+		telemetryService.captureModeSwitch(this.cline?.taskId ?? "0", chatSettings.mode)
+
 		// Get previous model info that we will revert to after saving current mode api info
 		const {
 			apiConfiguration,
 			previousModeApiProvider: newApiProvider,
 			previousModeModelId: newModelId,
 			previousModeModelInfo: newModelInfo,
+			previousModeThinkingBudgetTokens: newThinkingBudgetTokens,
 		} = await this.getState()
 
 		// Save the last model used in this mode
 		await this.updateGlobalState("previousModeApiProvider", apiConfiguration.apiProvider)
+		await this.updateGlobalState("previousModeThinkingBudgetTokens", apiConfiguration.thinkingBudgetTokens)
 		switch (apiConfiguration.apiProvider) {
 			case "anthropic":
 			case "bedrock":
 			case "vertex":
 			case "gemini":
+			case "asksage":
 				await this.updateGlobalState("previousModeModelId", apiConfiguration.apiModelId)
 				break
 			case "openrouter":
+			case "cline":
 				await this.updateGlobalState("previousModeModelId", apiConfiguration.openRouterModelId)
 				await this.updateGlobalState("previousModeModelInfo", apiConfiguration.openRouterModelInfo)
 				break
@@ -1070,19 +1216,25 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			case "litellm":
 				await this.updateGlobalState("previousModeModelId", apiConfiguration.liteLlmModelId)
 				break
+			case "requesty":
+				await this.updateGlobalState("previousModeModelId", apiConfiguration.requestyModelId)
+				break
 		}
 
 		// Restore the model used in previous mode
 		if (newApiProvider && newModelId) {
 			await this.updateGlobalState("apiProvider", newApiProvider)
+			await this.updateGlobalState("thinkingBudgetTokens", newThinkingBudgetTokens)
 			switch (newApiProvider) {
 				case "anthropic":
 				case "bedrock":
 				case "vertex":
 				case "gemini":
+				case "asksage":
 					await this.updateGlobalState("apiModelId", newModelId)
 					break
 				case "openrouter":
+				case "cline":
 					await this.updateGlobalState("openRouterModelId", newModelId)
 					await this.updateGlobalState("openRouterModelInfo", newModelInfo)
 					break
@@ -1102,6 +1254,9 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 				case "litellm":
 					await this.updateGlobalState("liteLlmModelId", newModelId)
 					break
+				case "requesty":
+					await this.updateGlobalState("requestyModelId", newModelId)
+					break
 			}
 
 			if (this.cline) {
@@ -1112,12 +1267,12 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 
 		await this.updateGlobalState("chatSettings", chatSettings)
 		await this.postStateToWebview()
-		// console.log("chatSettings", message.chatSettings)
+
 		if (this.cline) {
 			this.cline.updateChatSettings(chatSettings)
 			if (this.cline.isAwaitingPlanResponse && didSwitchToActMode) {
 				this.cline.didRespondToPlanAskBySwitchingMode = true
-				// this is necessary for the webview to update accordingly, but Cline instance will not send text back as feedback message
+				// Use chatContent if provided, otherwise use default message
 				await this.postMessageToWebview({
 					type: "invoke",
 					invoke: "sendMessage",
@@ -1130,57 +1285,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
-	/**
-	 * 订阅电子邮件地址到邮件列表。
-	 * 该函数首先验证电子邮件地址的格式，如果格式无效，则显示错误消息并返回。
-	 * 如果电子邮件地址有效，则将其发送到指定的API端点进行订阅，并通知Webview订阅成功。
-	 * 目前忽略API请求的错误，但在未来可能会处理这些错误。
-	 * @param {string} [email] - 要订阅的电子邮件地址。如果未提供或为空，则函数直接返回。
-	 */
-	async subscribeEmail(email?: string) {
-		// 如果未提供电子邮件地址，直接返回
-		if (!email) {
-			return
-		}
-
-		// 验证电子邮件地址的格式
-		const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-		if (!emailRegex.test(email)) {
-			vscode.window.showErrorMessage("Please enter a valid email address")
-			return
-		}
-
-		// 记录订阅的电子邮件地址并通知Webview订阅成功
-		console.log("Subscribing email:", email)
-		this.postMessageToWebview({ type: "emailSubscribed" })
-		// Currently ignoring errors to this endpoint, but after accounts we'll remove this anyways
-
-		// 发送API请求以订阅电子邮件地址
-		try {
-			const response = await axios.post(
-				"https://app.cline.bot/api/mailing-list",
-				{
-					email: email,
-				},
-				{
-					headers: {
-						"Content-Type": "application/json",
-					},
-				},
-			)
-			console.log("Email subscribed successfully. Response:", response.data)
-		} catch (error) {
-			// 记录订阅失败的错误信息
-			console.error("Failed to subscribe email:", error)
-		}
-	}
-
-	/**
-	 * 取消当前任务。
-	 * 该函数会尝试中止当前正在执行的任务，并确保任务状态被正确清理。
-	 * 如果任务正在流式处理中，函数会等待任务优雅地中止，或者超时后强制中止。
-	 * 最后，函数会重新初始化任务历史项，以确保任务状态被正确重置。
-	 */
 	async cancelTask() {
 		// 检查当前是否存在任务实例
 		if (this.cline) {
@@ -1255,25 +1359,39 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	 */
 	async getDocumentsPath(): Promise<string> {
 		if (process.platform === "win32") {
-			// If the user is running Win 7/Win Server 2008 r2+, we want to get the correct path to their Documents directory.
-
-			// 在Windows系统上，尝试通过PowerShell命令获取文档路径
 			try {
 				const { stdout: docsPath } = await execa("powershell", [
 					"-NoProfile", // Ignore user's PowerShell profile(s)
 					"-Command",
 					"[System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::MyDocuments)",
 				])
-				return docsPath.trim()
+				const trimmedPath = docsPath.trim()
+				if (trimmedPath) {
+					return trimmedPath
+				}
 			} catch (err) {
 				// 如果获取失败，回退到默认的 `~/Documents` 路径
 				console.error("Failed to retrieve Windows Documents path. Falling back to homedir/Documents.")
-				return path.join(os.homedir(), "Documents")
 			}
-		} else {
-			// 在POSIX系统上，默认返回 `~/Documents` 路径
-			return path.join(os.homedir(), "Documents") // On POSIX (macOS, Linux, etc.), assume ~/Documents by default (existing behavior, but may want to implement similar logic here)
+		} else if (process.platform === "linux") {
+			try {
+				// First check if xdg-user-dir exists
+				await execa("which", ["xdg-user-dir"])
+
+				// If it exists, try to get XDG documents path
+				const { stdout } = await execa("xdg-user-dir", ["DOCUMENTS"])
+				const trimmedPath = stdout.trim()
+				if (trimmedPath) {
+					return trimmedPath
+				}
+			} catch {
+				// Log error but continue to fallback
+				console.error("Failed to retrieve XDG Documents path. Falling back to homedir/Documents.")
+			}
 		}
+
+		// Default fallback for all platforms
+		return path.join(os.homedir(), "Documents")
 	}
 
 	/** 确保 `~/Documents/Cline/MCP` 目录存在。如果目录不存在，则创建该目录。 */
@@ -1405,27 +1523,39 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		return true
 	}
 
-	/**
-	 * 处理认证回调，使用自定义令牌进行登录并安全存储令牌。
-	 * 该函数通常在从外部认证提供者接收到认证令牌后调用。
-	 *
-	 * 在extension.ts中使用到
-	 *
-	 * @param {string} token - 从认证提供者接收到的自定义令牌。
-	 * @returns {Promise<void>} - 无返回值。
-	 */
-	async handleAuthCallback(token: string) {
+	async handleAuthCallback(customToken: string, apiKey: string) {
 		try {
-			// First sign in with Firebase to trigger auth state change
-			await this.authManager.signInWithCustomToken(token)
+			// Store API key for API calls
+			await this.storeSecret("clineApiKey", apiKey)
 
-			// Then store the token securely
-			await this.storeSecret("authToken", token)
+			// Send custom token to webview for Firebase auth
+			await this.postMessageToWebview({
+				type: "authCallback",
+				customToken,
+			})
+
+			const clineProvider: ApiProvider = "cline"
+			await this.updateGlobalState("apiProvider", clineProvider)
+
+			// Update API configuration with the new provider and API key
+			const { apiConfiguration } = await this.getState()
+			const updatedConfig = {
+				...apiConfiguration,
+				apiProvider: clineProvider,
+				clineApiKey: apiKey,
+			}
+
+			if (this.cline) {
+				this.cline.api = buildApiHandler(updatedConfig)
+			}
+
 			await this.postStateToWebview()
 			vscode.window.showInformationMessage("Successfully logged in to Cline")
 		} catch (error) {
 			console.error("Failed to handle auth callback:", error)
 			vscode.window.showErrorMessage("Failed to log in to Cline")
+			// Even on login failure, we preserve any existing tokens
+			// Only clear tokens on explicit logout
 		}
 	}
 
@@ -1555,10 +1685,13 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 				mcpDownloadDetails: mcpDetails,
 			})
 
-			// Create task with context from README
-			const task = `Set up the MCP server from ${mcpDetails.githubUrl}. 
-Use "${mcpDetails.mcpId}" as the server name in cline_mcp_settings.json.
-Once installed, demonstrate the server's capabilities by using one of its tools.
+			// Create task with context from README and added guidelines for MCP server installation
+			const task = `Set up the MCP server from ${mcpDetails.githubUrl} while adhering to these MCP server installation rules:
+- Use "${mcpDetails.mcpId}" as the server name in cline_mcp_settings.json.
+- Create the directory for the new MCP server before starting installation.
+- Use commands aligned with the user's shell and operating system best practices.
+- The following README may contain instructions that conflict with the user's OS, in which case proceed thoughtfully.
+- Once installed, demonstrate the server's capabilities by using one of its tools.
 Here is the project's README to help you get started:\n\n${mcpDetails.readmeContent}\n${mcpDetails.llmsInstallationContent}`
 
 			// Initialize task and show chat view
@@ -1764,6 +1897,11 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 					}
 
 					switch (rawModel.id) {
+						case "anthropic/claude-3-7-sonnet":
+						case "anthropic/claude-3-7-sonnet:beta":
+						case "anthropic/claude-3.7-sonnet":
+						case "anthropic/claude-3.7-sonnet:beta":
+						case "anthropic/claude-3.7-sonnet:thinking":
 						case "anthropic/claude-3.5-sonnet":
 						case "anthropic/claude-3.5-sonnet:beta":
 							// NOTE: this needs to be synced with api.ts/openrouter default model info
@@ -1928,12 +2066,27 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 	 * @returns Promise<void> - 该函数不返回任何值，但会异步执行删除操作。
 	 */
 	async deleteTaskWithId(id: string) {
-		// 如果当前任务ID与传入的ID匹配，则清除当前任务
+		console.info("deleteTaskWithId: ", id)
+
 		if (id === this.cline?.taskId) {
 			await this.clearTask()
+			console.debug("cleared task")
 		}
 
 		const { taskDirPath, apiConversationHistoryFilePath, uiMessagesFilePath } = await this.getTaskWithId(id)
+
+		// Delete checkpoints
+		console.info("deleting checkpoints")
+		const taskHistory = ((await this.getGlobalState("taskHistory")) as HistoryItem[] | undefined) || []
+		const historyItem = taskHistory.find((item) => item.id === id)
+		//console.log("historyItem: ", historyItem)
+		if (historyItem) {
+			try {
+				await CheckpointTracker.deleteCheckpoints(id, historyItem, this.context.globalStorageUri.fsPath)
+			} catch (error) {
+				console.error(`Failed to delete checkpoints for task ${id}:`, error)
+			}
+		}
 
 		await this.deleteTaskFromState(id)
 
@@ -1949,18 +2102,6 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 		const legacyMessagesFilePath = path.join(taskDirPath, "claude_messages.json")
 		if (await fileExistsAtPath(legacyMessagesFilePath)) {
 			await fs.unlink(legacyMessagesFilePath)
-		}
-
-		// Delete the checkpoints directory if it exists
-		// 删除检查点目录（如果存在）
-		const checkpointsDir = path.join(taskDirPath, "checkpoints")
-		if (await fileExistsAtPath(checkpointsDir)) {
-			try {
-				await fs.rm(checkpointsDir, { recursive: true, force: true })
-			} catch (error) {
-				console.error(`Failed to delete checkpoints directory for task ${id}:`, error)
-				// Continue with deletion of task directory - don't throw since this is a cleanup operation
-			}
 		}
 
 		await fs.rmdir(taskDirPath) // succeeds if the dir is empty
@@ -2016,7 +2157,8 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 			browserSettings,
 			chatSettings,
 			userInfo,
-			authToken,
+			mcpMarketplaceEnabled,
+			telemetrySetting,
 		} = await this.getState()
 
 		return {
@@ -2033,8 +2175,10 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 			autoApprovalSettings,
 			browserSettings,
 			chatSettings,
-			isLoggedIn: !!authToken,
 			userInfo,
+			mcpMarketplaceEnabled,
+			telemetrySetting,
+			vscMachineId: vscode.env.machineId,
 		}
 	}
 	/**
@@ -2116,11 +2260,13 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 			apiModelId,
 			apiKey,
 			openRouterApiKey,
+			clineApiKey,
 			awsAccessKey,
 			awsSecretKey,
 			awsSessionToken,
 			awsRegion,
 			awsUseCrossRegionInference,
+			awsBedrockUsePromptCache,
 			awsProfile,
 			awsUseProfile,
 			vertexProjectId,
@@ -2131,6 +2277,7 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 			openAiModelInfo,
 			ollamaModelId,
 			ollamaBaseUrl,
+			ollamaApiOptionsCtxNum,
 			lmStudioModelId,
 			lmStudioBaseUrl,
 			anthropicBaseUrl,
@@ -2156,22 +2303,29 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 			liteLlmBaseUrl,
 			liteLlmModelId,
 			userInfo,
-			authToken,
 			previousModeApiProvider,
 			previousModeModelId,
 			previousModeModelInfo,
+			previousModeThinkingBudgetTokens,
 			qwenApiLine,
 			liteLlmApiKey,
+			telemetrySetting,
+			asksageApiKey,
+			asksageApiUrl,
+			xaiApiKey,
+			thinkingBudgetTokens,
 		] = await Promise.all([
 			this.getGlobalState("apiProvider") as Promise<ApiProvider | undefined>,
 			this.getGlobalState("apiModelId") as Promise<string | undefined>,
 			this.getSecret("apiKey") as Promise<string | undefined>,
 			this.getSecret("openRouterApiKey") as Promise<string | undefined>,
+			this.getSecret("clineApiKey") as Promise<string | undefined>,
 			this.getSecret("awsAccessKey") as Promise<string | undefined>,
 			this.getSecret("awsSecretKey") as Promise<string | undefined>,
 			this.getSecret("awsSessionToken") as Promise<string | undefined>,
 			this.getGlobalState("awsRegion") as Promise<string | undefined>,
 			this.getGlobalState("awsUseCrossRegionInference") as Promise<boolean | undefined>,
+			this.getGlobalState("awsBedrockUsePromptCache") as Promise<boolean | undefined>,
 			this.getGlobalState("awsProfile") as Promise<string | undefined>,
 			this.getGlobalState("awsUseProfile") as Promise<boolean | undefined>,
 			this.getGlobalState("vertexProjectId") as Promise<string | undefined>,
@@ -2182,6 +2336,7 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 			this.getGlobalState("openAiModelInfo") as Promise<ModelInfo | undefined>,
 			this.getGlobalState("ollamaModelId") as Promise<string | undefined>,
 			this.getGlobalState("ollamaBaseUrl") as Promise<string | undefined>,
+			this.getGlobalState("ollamaApiOptionsCtxNum") as Promise<string | undefined>,
 			this.getGlobalState("lmStudioModelId") as Promise<string | undefined>,
 			this.getGlobalState("lmStudioBaseUrl") as Promise<string | undefined>,
 			this.getGlobalState("anthropicBaseUrl") as Promise<string | undefined>,
@@ -2207,12 +2362,17 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 			this.getGlobalState("liteLlmBaseUrl") as Promise<string | undefined>,
 			this.getGlobalState("liteLlmModelId") as Promise<string | undefined>,
 			this.getGlobalState("userInfo") as Promise<UserInfo | undefined>,
-			this.getSecret("authToken") as Promise<string | undefined>,
 			this.getGlobalState("previousModeApiProvider") as Promise<ApiProvider | undefined>,
 			this.getGlobalState("previousModeModelId") as Promise<string | undefined>,
 			this.getGlobalState("previousModeModelInfo") as Promise<ModelInfo | undefined>,
+			this.getGlobalState("previousModeThinkingBudgetTokens") as Promise<number | undefined>,
 			this.getGlobalState("qwenApiLine") as Promise<string | undefined>,
 			this.getSecret("liteLlmApiKey") as Promise<string | undefined>,
+			this.getGlobalState("telemetrySetting") as Promise<TelemetrySetting | undefined>,
+			this.getSecret("asksageApiKey") as Promise<string | undefined>,
+			this.getGlobalState("asksageApiUrl") as Promise<string | undefined>,
+			this.getSecret("xaiApiKey") as Promise<string | undefined>,
+			this.getGlobalState("thinkingBudgetTokens") as Promise<number | undefined>,
 		])
 
 		// 确定API提供者，如果未存储则根据条件设置默认值
@@ -2226,8 +2386,7 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 			if (apiKey) {
 				apiProvider = "anthropic"
 			} else {
-				// New users should default to openrouter
-				// 新用户默认使用openrouter
+				// New users should default to openrouter, since they've opted to use an API key instead of signing in
 				apiProvider = "openrouter"
 			}
 		}
@@ -2237,18 +2396,21 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 			.getConfiguration("cline.modelSettings.o3Mini")
 			.get("reasoningEffort", "medium")
 
-		// 返回所有配置和状态信息
+		const mcpMarketplaceEnabled = vscode.workspace.getConfiguration("cline").get<boolean>("mcpMarketplace.enabled", true)
+
 		return {
 			apiConfiguration: {
 				apiProvider,
 				apiModelId,
 				apiKey,
 				openRouterApiKey,
+				clineApiKey,
 				awsAccessKey,
 				awsSecretKey,
 				awsSessionToken,
 				awsRegion,
 				awsUseCrossRegionInference,
+				awsBedrockUsePromptCache,
 				awsProfile,
 				awsUseProfile,
 				vertexProjectId,
@@ -2259,6 +2421,7 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 				openAiModelInfo,
 				ollamaModelId,
 				ollamaBaseUrl,
+				ollamaApiOptionsCtxNum,
 				lmStudioModelId,
 				lmStudioBaseUrl,
 				anthropicBaseUrl,
@@ -2277,9 +2440,13 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 				openRouterModelInfo,
 				vsCodeLmModelSelector,
 				o3MiniReasoningEffort,
+				thinkingBudgetTokens,
 				liteLlmBaseUrl,
 				liteLlmModelId,
 				liteLlmApiKey,
+				asksageApiKey,
+				asksageApiUrl,
+				xaiApiKey,
 			},
 			lastShownAnnouncementId,
 			customInstructions,
@@ -2288,10 +2455,12 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 			browserSettings: browserSettings || DEFAULT_BROWSER_SETTINGS,
 			chatSettings: chatSettings || DEFAULT_CHAT_SETTINGS,
 			userInfo,
-			authToken,
 			previousModeApiProvider,
 			previousModeModelId,
 			previousModeModelInfo,
+			previousModeThinkingBudgetTokens,
+			mcpMarketplaceEnabled,
+			telemetrySetting: telemetrySetting || "unset",
 		}
 	}
 
@@ -2391,6 +2560,53 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 		return await this.context.secrets.get(key)
 	}
 
+	// Open Graph Data
+
+	async fetchOpenGraphData(url: string) {
+		try {
+			// Use the fetchOpenGraphData function from link-preview.ts
+			const ogData = await fetchOpenGraphData(url)
+
+			// Send the data back to the webview
+			await this.postMessageToWebview({
+				type: "openGraphData",
+				openGraphData: ogData,
+				url: url,
+			})
+		} catch (error) {
+			console.error(`Error fetching Open Graph data for ${url}:`, error)
+			// Send an error response
+			await this.postMessageToWebview({
+				type: "openGraphData",
+				error: `Failed to fetch Open Graph data: ${error}`,
+				url: url,
+			})
+		}
+	}
+
+	// Check if a URL is an image
+	async checkIsImageUrl(url: string) {
+		try {
+			// Check if the URL is an image
+			const isImage = await isImageUrl(url)
+
+			// Send the result back to the webview
+			await this.postMessageToWebview({
+				type: "isImageUrlResult",
+				isImage,
+				url,
+			})
+		} catch (error) {
+			console.error(`Error checking if URL is an image: ${url}`, error)
+			// Send an error response
+			await this.postMessageToWebview({
+				type: "isImageUrlResult",
+				isImage: false,
+				url,
+			})
+		}
+	}
+
 	// dev
 	/**
 	 * 重置当前上下文的状态，包括清除所有全局状态键和密钥。
@@ -2422,8 +2638,10 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 			"togetherApiKey",
 			"qwenApiKey",
 			"mistralApiKey",
+			"clineApiKey",
 			"liteLlmApiKey",
-			"authToken",
+			"asksageApiKey",
+			"xaiApiKey",
 		]
 		for (const key of secretKeys) {
 			await this.storeSecret(key, undefined)
