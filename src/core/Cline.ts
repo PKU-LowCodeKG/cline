@@ -3392,6 +3392,8 @@ export class Cline {
 				let newTask = `<task>\n${text}。请使用 git clone 命令下载这个仓库，并使用 code 命令，在当前 VS Code 工作区中打开这个仓库\n</task>`
 				newContent = messageBlock.text.replace(/<task>[\s\S]*<\/task>/, newTask);
 				messageBlock.text = newContent
+				// 弹出重复的 environmentDetails，因为在新的一次递归中会重新加载环境信息
+				userContent.pop()
 				// 用新的 userContent 来递归
 				await this.recursivelyMakeClineRequests(userContent, includeFileDetails, isNewTask)
 				return true
