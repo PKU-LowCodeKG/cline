@@ -376,34 +376,55 @@ async function getSummaryFromRepoUrl(url: string): Promise<string> {
 }
 
 async function getReusableRepoListFromReq(req: string): Promise<string> {
+
+	let crawlerResult = `根据您的需求：< ${req} >，以下是我们为您推荐的可复用仓库信息：`
+
 	try {
-		const reusableRepoList = await axios.post("https://example.com/", { req })
-		return reusableRepoList.data
+		const { data } = await axios.post("http://localhost:5000/fetch", { "query": req })
+		console.log(data.repositories)
+		crawlerResult += buildRepoInfoString(data.repositories)
 	} catch (error) {
-		console.error(`Error fetching reusable repo list for req ${req}: ${error.message}`)
-
-		let crawlerResult = `根据您的需求：< ${req} >，以下是我们为您推荐的可复用仓库信息：`
-		// 这里选择 3 个 是控制上下文，因为 Cline 没有做第一次发起请求时上下文过长的情况
-		for (let i = 0; i < DefaultData.length && i < 3; i++) {
-			crawlerResult += `
-# NO.${i + 1}
-- 项目名称：${DefaultData[i].full_name}
-- 项目地址：${DefaultData[i].html_url}
-- 推荐评分：${DefaultData[i].score}
-- 优势：${DefaultData[i].strengths.join("、")}
-- 风险：${DefaultData[i].risks.join("、")}
-- 总体建议：${DefaultData[i].recommendations.join("、")}
-下面是该项目的详细描述：
-${DefaultData[i].readme.slice(12, -3)}
----
-`
-		}
-
-		return crawlerResult
+		console.error(`⚠ Error fetching reusable repo list for req ${req}: ${error.message}`)
+		crawlerResult += buildRepoInfoString(DefaultData)
 	}
+	return crawlerResult
 }
 
-const DefaultData = [
+interface RepoInfo {
+	clone_url: string
+	full_name: string
+	html_url: string
+	readme: string
+	recommendations: string[]
+	risks: string[]
+	score: number
+	ssh_url: string
+	strengths: string[]
+	url: string
+}
+
+const buildRepoInfoString = (repo: RepoInfo[]): string => {
+	let repoInfoString = ""
+	// 这里选择 3 个 是控制上下文，因为 Cline 没有做第一次发起请求时上下文过长的情况
+	for (let i = 0; i < repo.length && i < 3; i++) {
+		repoInfoString += `
+# NO.${i + 1}
+- 项目名称：${repo[i].full_name}
+- 项目地址：${repo[i].html_url}
+- 推荐评分：${repo[i].score}
+- 优势：${repo[i].strengths.join("、")}
+- 风险：${repo[i].risks.join("、")}
+- 总体建议：${repo[i].recommendations.join("、")}
+下面是该项目的详细描述：
+${repo[i].readme.slice(12, -3)}
+---
+`
+	}
+	return repoInfoString
+}
+
+// 按照接口重写 DefaultData，并调整其 key 的顺序
+const DefaultData: RepoInfo[] = [
     {
         "score": 95,
         "strengths": [
@@ -418,7 +439,6 @@ const DefaultData = [
             "建议检查项目的更新频率和维护情况",
             "考虑是否有其他更活跃的类似项目作为备选方案"
         ],
-        "decision": "有条件推荐",
         "full_name": "TaleLin/lin-cms-spring-boot",
         "url": "https://api.github.com/repos/TaleLin/lin-cms-spring-boot",
         "html_url": "https://github.com/TaleLin/lin-cms-spring-boot",
@@ -439,7 +459,6 @@ const DefaultData = [
             "检查依赖项与现有环境的兼容性",
             "评估社区活跃度和维护情况"
         ],
-        "decision": "有条件推荐",
         "full_name": "iszhouhua/blog",
         "url": "https://api.github.com/repos/iszhouhua/blog",
         "html_url": "https://github.com/iszhouhua/blog",
@@ -461,7 +480,6 @@ const DefaultData = [
             "建议检查项目的活跃度和维护情况，确保能够获得持续的支持",
             "建议在使用前与项目作者确认开源协议，避免潜在的法律问题"
         ],
-        "decision": "有条件推荐",
         "full_name": "ZHENFENG13/My-Blog-layui",
         "url": "https://api.github.com/repos/ZHENFENG13/My-Blog-layui",
         "html_url": "https://github.com/ZHENFENG13/My-Blog-layui",
@@ -482,7 +500,6 @@ const DefaultData = [
             "建议检查项目的依赖项是否与现有环境兼容",
             "考虑项目的维护情况和更新频率"
         ],
-        "decision": "有条件推荐",
         "full_name": "Raysmond/SpringBlog",
         "url": "https://api.github.com/repos/Raysmond/SpringBlog",
         "html_url": "https://github.com/Raysmond/SpringBlog",
@@ -504,7 +521,6 @@ const DefaultData = [
             "建议检查并升级到最新的Spring Boot版本以确保兼容性和安全性",
             "考虑项目的维护情况和社区活跃度，评估是否需要长期支持"
         ],
-        "decision": "有条件推荐",
         "full_name": "caozongpeng/SpringBootBlog",
         "url": "https://api.github.com/repos/caozongpeng/SpringBootBlog",
         "html_url": "https://github.com/caozongpeng/SpringBootBlog",
