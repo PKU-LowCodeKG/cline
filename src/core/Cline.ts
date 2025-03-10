@@ -855,7 +855,7 @@ export class Cline {
 
 					await this.say("checkpoint_created")
 
-					await this.say("text", `请稍等，我正在对项目进行总结`)
+					await this.say("text", `请稍等，我正在生成帮助您理解的总结`)
 
 					// 3. 获取项目功能总结
 					let summaryResponse = await fetch("http://localhost:5000/api/project_summary", {
@@ -877,8 +877,8 @@ export class Cline {
 
 					await this.say("checkpoint_created")
 
-					await this.say("text", `已下载完成，以下是该项目的功能、技术栈和应用情况：
-  ${projectSummary}`)
+					await this.say("text", `${projectSummary}
+已完成总结，以上是该项目的功能、技术架构，和别人使用的评价：`)
 
 					await this.say("checkpoint_created")
 
