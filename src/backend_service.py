@@ -65,12 +65,12 @@ def project_summary():
             dir_tree += f'{subindent}{file}\n'
 
     # Prepare prompt for the model
-    prompt = f"""Below is a directory tree of a project. Please provide a hierarchical summary with numbered sections (like 1.1, 1.1.1) describing the project structure and functionality of each major component. Focus on the project's organization and purpose of different directories/files.
+    prompt = f"""下面是一个项目的目录树结构。请提供两层的层次化摘要，使用编号部分（1、1.1）来描述项目结构和每个主要组件的功能。重点关注项目的组织结构和不同目录/文件的用途。
 
-Directory Tree:
+目录树：
 {dir_tree}
 
-Please provide a detailed hierarchical summary:"""
+请提供详细的两层层次化摘要："""
 
     # Call Ollama API
     try:
