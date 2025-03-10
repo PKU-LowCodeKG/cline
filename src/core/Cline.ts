@@ -830,7 +830,6 @@ export class Cline {
         
         data = await response.json()
         githubUrl = data.github_url
-        description = data.description
 
         await this.say("checkpoint_created")
         
@@ -849,14 +848,38 @@ export class Cline {
 
           await this.say("text", `请等待，正在下载项目`)
 
+		  const tempRepoPath = `${this.providerRef.deref()?.context.globalStorageUri.fsPath}/temp_repo`
+
           // 用户接受，执行git clone
-          await this.executeCommandTool(`git clone ${githubUrl} ${this.providerRef.deref()?.context.globalStorageUri.fsPath}/temp_repo`)
+          await this.executeCommandTool(`git clone ${githubUrl} ${tempRepoPath}`)
           // 显示项目描述
 
-          await this.say("checkpoint_created")
+		  await this.say("checkpoint_created")
+
+		  await this.say("text", `请等待，正在对项目进行总结`)
+
+			// 3. 获取项目功能总结
+			let summaryResponse = await fetch("http://localhost:5000/api/project_summary", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({ 
+					project_path: tempRepoPath
+				}),
+			})
+
+			if (!summaryResponse.ok) {
+			throw new Error(`HTTP error! status: ${summaryResponse.status}`)
+			}
+
+			let summaryData = await summaryResponse.json()
+			let projectSummary = summaryData.summary
+
+          await this.say("checkpoint_created")  
 
           await this.say("text", `已下载完成，以下是该项目的功能、技术栈和应用情况：
-  ${description}`)
+  ${projectSummary}`)
 
           await this.say("checkpoint_created")
 

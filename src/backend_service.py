@@ -1,6 +1,8 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import random
+import requests
+import os
 
 app = Flask(__name__)
 CORS(app)  # 允许跨域请求
@@ -28,9 +30,8 @@ def get_repo():
     # 这里可以添加更复杂的逻辑来匹配任务和合适的仓库
     # 现在简单随机返回一个
     repo = random.choice(GITHUB_REPOS)
-    description = "2. 文辉对项目的summary等更加详细的项目描述"
     
-    return jsonify({"github_url": repo, "description": description})
+    return jsonify({"github_url": repo})
 
 @app.route('/api/mid_output', methods=['POST'])
 def mid_output():
@@ -44,5 +45,48 @@ def mid_output():
     
     return jsonify({"description": description})
 
+@app.route('/api/project_summary', methods=['POST'])
+def project_summary():
+    """Generate a hierarchical summary of a project directory"""
+    data = request.json
+    project_path = data.get('project_path', '')
+    
+    if not project_path or not os.path.exists(project_path):
+        return jsonify({"error": "Invalid project path"}), 400
+    
+    # Build directory tree string
+    dir_tree = ""
+    for root, dirs, files in os.walk(project_path):
+        level = root.replace(project_path, '').count(os.sep)
+        indent = ' ' * 4 * level
+        dir_tree += f'{indent}{os.path.basename(root)}/\n'
+        subindent = ' ' * 4 * (level + 1)
+        for file in files:
+            dir_tree += f'{subindent}{file}\n'
+
+    # Prepare prompt for the model
+    prompt = f"""Below is a directory tree of a project. Please provide a hierarchical summary with numbered sections (like 1.1, 1.1.1) describing the project structure and functionality of each major component. Focus on the project's organization and purpose of different directories/files.
+
+Directory Tree:
+{dir_tree}
+
+Please provide a detailed hierarchical summary:"""
+
+    # Call Ollama API
+    try:
+        response = requests.post(
+            'http://10.129.164.27:11434/api/generate',
+            json={
+                'model': 'deepseek-r1:32b',
+                'prompt': prompt,
+                'stream': False
+            }
+        )
+        response.raise_for_status()
+        summary = response.json().get('response', '')
+        return jsonify({"summary": summary})
+    except requests.exceptions.RequestException as e:
+        return jsonify({"error": f"Failed to connect to Ollama API: {str(e)}"}), 500
+
 if __name__ == '__main__':
-    app.run(debug=True, port=5000) 
+    app.run(debug=True, port=5000)
