@@ -779,6 +779,46 @@ export class Cline {
 		}
 	}
 
+	// 处理评估结果的格式化显示函数
+	private formatEvaluationResult(evaluation: any): string {
+		if (!evaluation) return "无评估结果";
+
+		try {
+			if (typeof evaluation === 'string') {
+				return evaluation;
+			}
+
+			let result = "";
+
+			// 添加名称和URL
+			if (evaluation.url) result += `仓库地址: ${evaluation.html_url}\n\n`;
+
+			// 添加评分 
+			if (evaluation.score !== undefined) {
+				result += `得分: ${evaluation.score}\n\n`;
+			}
+
+			// 添加推荐理由
+			if (evaluation.recommendations) {
+				result += `推荐理由: ${evaluation.recommendations}\n\n`;
+			}
+
+			// 添加优点
+			if (evaluation.strengths) {
+				result += `优点: ${evaluation.strengths}\n\n`;
+			}
+
+			// 添加缺点
+			if (evaluation.risks) {
+				result += `缺点: ${evaluation.risks}\n\n`;
+			}
+
+			return result || JSON.stringify(evaluation, null, 2);
+		} catch (e) {
+			return `评估结果解析错误: ${JSON.stringify(evaluation)}`;
+		}
+	}
+
 	// Task lifecycle
 
 	private async startTask(task?: string, images?: string[]): Promise<void> {
@@ -794,46 +834,114 @@ export class Cline {
 		await this.say("checkpoint_created")
 
 		// 显示欢迎信息
-		await this.say("text", "您好，我将按照复用的方式来为您开发。首先我会搜索已有的软件项目：", images)
+		await this.say("text", "您好，我将按照复用的方式来为您开发，首先我会搜索已有的软件项目。请等待，正在搜索...", images)
 
 		// 调用Flask后端搜索GitHub仓库
 		try {
 
 			let retryCount = 0
 			while (retryCount < 3) {
-				let response = await fetch("http://localhost:5000/api/mid_output", {
+				const controller = new AbortController();
+				const signal = controller.signal;
+
+				const response = await fetch("http://localhost:5000/get_url_stream", {
 					method: "POST",
 					headers: {
 						"Content-Type": "application/json",
 					},
-					body: JSON.stringify({ task: task || "React应用" }),
-				})
-
-				let data = await response.json()
-				let githubUrl = data.github_url
-				let description = data.description
-
-				await this.say("text", description)
-
-				response = await fetch("http://localhost:5000/api/get_repo", {
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-					},
-					body: JSON.stringify({ task: task || "React应用" }),
-				})
+					body: JSON.stringify({ "query": task || "React应用" }),
+					signal: signal
+				});
 
 				if (!response.ok) {
-					throw new Error(`HTTP error! status: ${response.status}`)
+					throw new Error(`HTTP error! status: ${response.status}`);
 				}
 
-				data = await response.json()
-				githubUrl = data.github_url
+				// 处理SSE流
+				const reader = response.body?.getReader();
+				const decoder = new TextDecoder();
+				let repositories: any[] = [];
 
-				await this.say("checkpoint_created")
+				if (reader) {
+					try {
+						while (true) {
+							const { done, value } = await reader.read();
+							if (done) {
+								break;
+							}
+
+							const text = decoder.decode(value, { stream: true });
+							const lines = text.split("\n\n");
+
+							for (const line of lines) {
+								if (line.startsWith('data: ')) {
+									const jsonData = JSON.parse(line.slice(6));
+
+									// 根据不同步骤展示不同的信息
+									switch (jsonData.step) {
+										case 'initial_requirements':
+											await this.say("checkpoint_created")
+											await this.say("text", `正在分析您的需求: "${jsonData.data}"...`);
+											break;
+										case 'refined_requirements':
+											await this.say("checkpoint_created")
+											await this.say("text", `我理解您的核心需求是: "${jsonData.data}"`);
+											break;
+										case 'search_keywords':
+											await this.say("checkpoint_created")
+											await this.say("text", `使用以下关键词搜索: ${jsonData.data.join(", ")}`);
+											break;
+										case 'initial_repositories':
+											await this.say("checkpoint_created")
+											await this.say("text", `初步找到 ${jsonData.data} 个相关仓库，正在筛选...`);
+											break;
+										case 'unique_repositories':
+											await this.say("checkpoint_created")
+											await this.say("text", `去重后剩余 ${jsonData.data} 个仓库`);
+											break;
+										case 'recalled_repositories':
+											await this.say("checkpoint_created")
+											await this.say("text", `筛选出最相关的 ${jsonData.data.length} 个仓库，正在评估仓库1/3...`);
+											break;
+										case 'evaluation_progress':
+											if (jsonData.data.index === 3) {
+												await this.say("checkpoint_created")
+												await this.say("text", `第${jsonData.data.index}个仓库的评估结果是\n\n${this.formatEvaluationResult(jsonData.data.current)}`);
+											} else {
+												await this.say("checkpoint_created")
+												await this.say("text", `第${jsonData.data.index}个仓库的评估结果是\n\n${this.formatEvaluationResult(jsonData.data.current)}`);
+												await this.say("text", `正在评估仓库 (${jsonData.data.index + 1}/${jsonData.data.total})...`);
+											}
+											break;
+										case 'final_result':
+											repositories = jsonData.data;
+											await this.say("checkpoint_created")
+											await this.say("text", `评估完成！`);
+											break;
+									}
+								}
+							}
+						}
+					} catch (error) {
+						console.error("读取流时出错:", error);
+						controller.abort();
+						throw error;
+					}
+				}
+
+				if (repositories.length <= 0) {
+					throw new Error("未找到合适的仓库");
+				}
+				const githubUrl = repositories[0].html_url;
+
+				await this.say("checkpoint_created");
 
 				// 显示搜索结果
-				await this.say("text", `按照我的搜索，建议您考虑在${githubUrl.split("/").pop()}项目上进行修改提升，请问您是否接受我的建议？`)
+				await this.say("text", `按照我的搜索，建议您考虑在${githubUrl.split("/").pop()}项目上进行修改提升。
+	下面是我的推荐理由：
+	${repositories[0].recommendations || repositories[0].evaluation || "这是最匹配您需求的项目"}
+	请问您是否接受我的建议？`);
+
 
 				// 等待用户选择是否接受
 				const { response: userResponse } = await this.ask("tool", JSON.stringify({
@@ -858,7 +966,7 @@ export class Cline {
 					await this.say("text", `请稍等，我正在生成帮助您理解的总结`)
 
 					// 3. 获取项目功能总结
-					let summaryResponse = await fetch("http://localhost:5000/api/project_summary", {
+					let summaryResponse = await fetch("http://localhost:5000/project_summary", {
 						method: "POST",
 						headers: {
 							"Content-Type": "application/json",
@@ -877,8 +985,7 @@ export class Cline {
 
 					await this.say("checkpoint_created")
 
-					await this.say("text", `${projectSummary}
-已完成总结，以上是该项目的功能、技术架构，和别人使用的评价：`)
+					await this.say("text", `${projectSummary}`)
 
 					await this.say("checkpoint_created")
 
