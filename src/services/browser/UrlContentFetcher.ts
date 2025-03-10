@@ -67,20 +67,6 @@ export class UrlContentFetcher {
 		return stats
 	}
 
-	async downloadFile(url: string, filePath: string): Promise<void> {
-		return new Promise((resolve, reject) => {
-			exec(`git clone ${url} ${filePath}`, (error, stdout, stderr) => {
-				if (error) {
-					console.error(`Error cloning repository: ${stderr}`)
-					reject(error)
-				} else {
-					console.log(`Repository cloned successfully: ${stdout}`)
-					resolve()
-				}
-			})
-		})
-	}
-
 	/**
 	 * 启动浏览器实例，并创建一个新的页面实例。初始化 UrlContentFetcher 的 browser 和 page 属性。
 	 */

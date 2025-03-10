@@ -134,14 +134,10 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 				result = `Error fetching content: ${launchBrowserError.message}`
 			} else {
 				try {
-					// To Do, 从URL下载软件项目到指定目录（默认当前工作区目录）
-					// urlContentFetcher.downloadFile(mention, cwd);
-					urlContentFetcher.downloadFile(mention, "D:/Downloads/test")
 					// 使用UrlContentFetcher工具从URL获取内容并转换为Markdown格式
 					const markdown = await urlContentFetcher.urlToMarkdown(mention)
 					result = markdown
 				} catch (error) {
-					// 捕获获取URL内容时的错误
 					vscode.window.showErrorMessage(`Error fetching content for ${mention}: ${error.message}`)
 					result = `Error fetching content: ${error.message}`
 				}
