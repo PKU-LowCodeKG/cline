@@ -843,22 +843,12 @@ export class Cline {
 		}
 	}
 
-	// Task lifecycle
-
-	private async startTask(task?: string, images?: string[]): Promise<void> {
-		// conversationHistory (for API) and clineMessages (for webview) need to be in sync
-		// if the extension process were killed, then on restart the clineMessages might not be empty, so we need to set it to [] when we create a new Cline client (otherwise webview would show stale messages from previous session)
-		this.clineMessages = []
-		this.apiConversationHistory = []
-
-		await this.providerRef.deref()?.postStateToWebview()
-
-		await this.say("text", task, images)
-
+	private async SearchAgent(task?: string){
+		
 		await this.say("checkpoint_created")
 
 		// 显示欢迎信息
-		await this.say("text", "您好，我将按照复用的方式来为您开发，首先我会搜索已有的软件项目。请等待，正在搜索...", images)
+		await this.say("text", "您好，我将按照复用的方式来为您开发，首先我会搜索已有的软件项目。请等待，正在搜索...")
 
 		// 调用Flask后端搜索GitHub仓库
 		try {
@@ -1022,7 +1012,6 @@ export class Cline {
 
 					if (buildResponse === "yesButtonClicked") {
 						task = `请为${this.providerRef.deref()?.context.globalStorageUri.fsPath}/temp_repo项目安装依赖并启动`
-						images = []
 					}
 					break;
 				}
@@ -1040,6 +1029,23 @@ export class Cline {
 			// 如果搜索失败，继续正常的任务流程
 			await this.say("text", "搜索GitHub仓库失败")
 		}
+
+		return task;
+	}
+
+	// Task lifecycle
+
+	private async startTask(task?: string, images?: string[]): Promise<void> {
+		// conversationHistory (for API) and clineMessages (for webview) need to be in sync
+		// if the extension process were killed, then on restart the clineMessages might not be empty, so we need to set it to [] when we create a new Cline client (otherwise webview would show stale messages from previous session)
+		this.clineMessages = []
+		this.apiConversationHistory = []
+
+		await this.providerRef.deref()?.postStateToWebview()
+
+		await this.say("text", task, images)
+
+		task = await this.SearchAgent(task)
 
 		this.isInitialized = true
 
