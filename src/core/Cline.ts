@@ -858,7 +858,7 @@ export class Cline {
 				const controller = new AbortController();
 				const signal = controller.signal;
 
-				const response = await fetch("http://localhost:5000/get_url_stream", {
+				const response = await fetch("http://localhost:5000/get_fake_url_stream", {
 					method: "POST",
 					headers: {
 						"Content-Type": "application/json",
@@ -980,7 +980,7 @@ export class Cline {
 					await this.say("text", `请稍等，我正在生成帮助您理解的总结`)
 
 					// 3. 获取项目功能总结
-					let summaryResponse = await fetch("http://localhost:5000/project_summary", {
+					let summaryResponse = await fetch("http://localhost:5000/project_fake_summary", {
 						method: "POST",
 						headers: {
 							"Content-Type": "application/json",
