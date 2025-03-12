@@ -4,6 +4,7 @@ import { ApiHandler } from "../"
 import { ApiHandlerOptions, ModelInfo, openAiModelInfoSaneDefaults } from "../../shared/api"
 import { convertToOllamaMessages } from "../transform/ollama-format"
 import { ApiStream } from "../transform/stream"
+import { logMessages, logStreamOutput } from "../../core/prompts/show_prompt"
 
 export class OllamaHandler implements ApiHandler {
 	private options: ApiHandlerOptions
@@ -17,6 +18,9 @@ export class OllamaHandler implements ApiHandler {
 	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
 		const ollamaMessages: Message[] = [{ role: "system", content: systemPrompt }, ...convertToOllamaMessages(messages)]
 
+		// Log input messages
+		logMessages(ollamaMessages)
+
 		const stream = await this.client.chat({
 			model: this.getModel().id,
 			messages: ollamaMessages,
@@ -25,14 +29,28 @@ export class OllamaHandler implements ApiHandler {
 				num_ctx: Number(this.options.ollamaApiOptionsCtxNum) || 32768,
 			},
 		})
+
+		// Create a generator for collecting chunks
+		const chunks: Array<{ type: "text", text: string }> = []
 		for await (const chunk of stream) {
 			if (typeof chunk.message.content === "string") {
-				yield {
-					type: "text",
+				const streamChunk = {
+					type: "text" as const,
 					text: chunk.message.content,
 				}
+				chunks.push(streamChunk)
+				yield streamChunk
 			}
 		}
+
+		// Log complete output
+		await logStreamOutput({
+			async *[Symbol.asyncIterator]() {
+				for (const chunk of chunks) {
+					yield chunk
+				}
+			}
+		} as ApiStream)
 	}
 
 	getModel(): { id: string; info: ModelInfo } {

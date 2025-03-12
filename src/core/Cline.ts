@@ -68,6 +68,8 @@ const cwd = vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath
 type ToolResponse = string | Array<Anthropic.TextBlockParam | Anthropic.ImageBlockParam>
 type UserContent = Array<Anthropic.ContentBlockParam>
 
+export let globalStoragePath: any;
+
 export class Cline {
 	readonly taskId: string
 	readonly apiProvider?: string
@@ -173,7 +175,7 @@ export class Cline {
 	// Storing task to disk for history
 
 	private async ensureTaskDirectoryExists(): Promise<string> {
-		const globalStoragePath = this.providerRef.deref()?.context.globalStorageUri.fsPath
+		globalStoragePath = this.providerRef.deref()?.context.globalStorageUri.fsPath
 		if (!globalStoragePath) {
 			throw new Error("Global storage uri is invalid")
 		}
