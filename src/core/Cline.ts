@@ -62,6 +62,8 @@ import { ClineHandler } from "../api/providers/cline"
 import { ClineProvider, GlobalFileNames } from "./webview/ClineProvider"
 import { DEFAULT_LANGUAGE_SETTINGS, getLanguageKey, LanguageDisplay, LanguageKey } from "../shared/Languages"
 import { telemetryService } from "../services/telemetry/TelemetryService"
+import axios from "axios"
+import { buildRepoInfoString, RepoInfo } from "./repoInfo"
 
 const cwd = vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath).at(0) ?? path.join(os.homedir(), "Desktop") // may or may not exist but fs checking existence would immediately ask for permission which would be bad UX, need to come up with a better solution
 
@@ -653,7 +655,7 @@ export class Cline {
 	 * 由 `handleWebviewAskResponse()` 函数设置 Cline 实例的 askResponse 3 个属性。
 	 *
 	 * 【ask 和 say 的共性】
-	 * 1. ask 和 say 的 type 对后端处理无用，只涉及前端，比如以不同的 ui 元素展示。
+	 * 1. ask 和 say 的 type 直接涉及前端，比如以不同的 ui 元素展示。通过前端交互影响后端。
 	 * 2. ask 和 say 函数本身只会影响后端的 Cline Message，不会直接影响 API 对话历史。
 	 *    只不过 Cline Message 的一部分内容会在别处转为 API 对话历史
 	 * 3. partial 变量有三个有效的状态：
@@ -779,11 +781,14 @@ export class Cline {
 		}
 
 		// NOTE: pWaitFor 库等待 this.askResponse 不为 undefined 或者 this.lastMessageTs 不等于 askTs 这两个条件之一满足（每隔 100ms 检查一次）
+		console.log("askTs：", askTs)
+		console.log("this.lastMessageTs：", this.lastMessageTs)
 		await pWaitFor(() => this.askResponse !== undefined || this.lastMessageTs !== askTs, { interval: 100 })
 		// NOTE: 当前 ask 请求的时间戳与 发起请求时的时间戳不一致（即消息数组中最后一条消息的时间戳
 		// 说明 这是发送多个 ask 请求的场景中（例如 command_output 的情况）。此时，当前 ask 请求已经被后续请求覆盖，应该被忽略
 		if (this.lastMessageTs !== askTs) {
-			throw new Error("Current ask promise was ignored") // could happen if we send multiple asks in a row i.e. with command_output. It's important that when we know an ask could fail, it is handled gracefully
+			console.log("时间戳不一致时，this.askResponse：", this.askResponse)
+			throw new Error("Current ask promise was ignored 测试") // could happen if we send multiple asks in a row i.e. with command_output. It's important that when we know an ask could fail, it is handled gracefully
 		}
 		const result = {
 			response: this.askResponse!,
@@ -3221,6 +3226,236 @@ export class Cline {
 		}
 	}
 
+	// async handleRepoSearchAgent_1(req: string) {
+	// 	let repositories: string | any[] = [];
+	// 	let url: string = "";
+	// 	let _text: string = "";
+	// 	let _images: string[] = [];
+	// 	try {
+	// 		const controller = new AbortController();
+	// 		const signal = controller.signal;
+
+	// 		const response = await axios.post("http://localhost:5000/get_url_stream", 
+	// 			{ "query": req },
+	// 			{
+	// 				responseType: "stream",
+	// 				signal,
+	// 			}
+	// 		);
+
+	// 		// 处理 SSE 流
+	// 		const reader = response.data;
+	// 		const decoder = new TextDecoder();
+
+	// 		// 返回一个 Promise 来等待流数据处理完成
+	// 		await new Promise<void>((resolve, reject) => {
+	// 			reader.on("data", async (chunk: Buffer) => {
+	// 				try {
+	// 					const text = decoder.decode(chunk, { stream: true });
+	// 					const lines = text.split("\n\n");
+
+	// 					for (const line of lines) {
+	// 						if (line.startsWith("data: ")) {
+	// 							const { step, data } = JSON.parse(line.slice(6));
+
+	// 							switch (step) {
+	// 								case "initial_requirements":
+	// 									console.log(`正在分析您的需求: "${data}"...`)
+	// 									await this.say("checkpoint_created")
+	// 									await this.say("text", `正在分析您的需求: "${data}"...`)
+	// 									break;
+	// 								case "refined_requirements":
+	// 									console.log(`正在细化您的需求: "${data}"...`)
+	// 									await this.say("checkpoint_created")
+	// 									await this.say("text", `正在细化您的需求: "${data}"...`)
+	// 									break;
+	// 								case 'search_keywords':
+	// 									console.log(`使用以下关键词搜索: ${data.join(", ")}`)
+	// 									await this.say("checkpoint_created")
+	// 									await this.say("text", `使用以下关键词搜索: ${data.join(", ")}`)
+	// 									break;
+	// 								case 'initial_repositories':
+	// 									console.log(`初步找到 ${data} 个相关仓库，正在筛选...`)
+	// 									await this.say("checkpoint_created")
+	// 									await this.say("text", `初步找到 ${data} 个相关仓库，正在筛选...`)
+	// 									break;
+	// 								case 'unique_repositories':
+	// 									console.log(`去重后剩余 ${data} 个仓库`)
+	// 									await this.say("checkpoint_created")
+	// 									await this.say("text", `去重后剩余 ${data} 个仓库`)
+	// 									break;
+	// 								case 'recalled_repositories':
+	// 									console.log(`筛选出最相关的 ${data.length} 个仓库，正在评估仓库1/3...`)
+	// 									await this.say("checkpoint_created")
+	// 									await this.say("text", `筛选出最相关的 ${data.length} 个仓库，正在评估仓库1/3...`)
+	// 									break;
+	// 								case 'evaluation_progress':
+	// 									const { index, total, current }: { index: number, total: number, current: RepoInfo} = data;
+	// 									console.log(`第${index}个仓库的评估结果是\n\n${current}`)
+	// 									url += current.html_url + "\n\n"
+
+	// 									await this.say("checkpoint_created")
+	// 									await this.say("text", `第${index}个仓库的评估结果是\n\n${buildRepoInfoString(current)}`)
+	// 									if (data.index !== 3) {
+	// 										console.log(`正在评估仓库 (${index + 1}/${data.total})...`);
+	// 										await this.say("text", `正在评估仓库 (${index + 1}/${total})...`)
+	// 									}
+	// 									break;
+	// 								case 'final_result':
+	// 									repositories = data;
+	// 									await this.say("checkpoint_created")
+	// 									await this.say("text", "评估完成！")
+	// 									break;
+	// 							}
+	// 						}
+	// 					}
+	// 				} catch (error) {
+	// 					console.error("解析流数据时出错:", error);
+	// 					controller.abort();
+	// 					reject(error); // Reject the Promise on error
+	// 				}
+	// 			});
+
+	// 			reader.on("end", () => {
+	// 				console.log("流数据已经读取完毕");
+	// 				resolve(); // Resolve the Promise when the stream ends
+	// 			});
+
+	// 			reader.on("error", (error: any) => {
+	// 				console.error("读取流数据时出错:", error);
+	// 				reject(error); // Reject the Promise on error
+	// 			});
+	// 		});
+
+	// 		// 这里再提问一下用户，让用户选择一个项目进行复用
+	// 		const { text, images } = await this.ask("followup", "检索到的项目已经展示结束，请您选择一个项目进行复用。在您选择后，我们会自动下载项目")
+	// 		await this.say("user_feedback", text ?? "", images)
+
+	// 		_text = text ?? ""
+	// 		_images = images ?? []
+	// 	} catch (error) {
+	// 		console.error(error);
+	// 	}
+	// 	console.log("repositories: ", repositories);
+	// 	console.log("url: ", url);
+	// 	return { repositories, url, _text, _images };
+	// }
+
+	async handleRepoSearchAgent(req: string) {
+
+		let repositories: string | any[] = [];
+		let url: string = "";
+		let _text: string = "";
+		let _images: string[] = [];
+		try {
+				const controller = new AbortController();
+				const signal = controller.signal;
+
+				const response = await fetch("http://localhost:5000/get_url_stream", {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+					},
+					body: JSON.stringify({ "query": req || "React应用" }),
+					signal
+				});
+
+				if (!response.ok) {
+					throw new Error(`HTTP error! status: ${response.status}`);
+				}
+
+				// 处理SSE流
+				const reader = response.body?.getReader();
+				const decoder = new TextDecoder();
+
+				if (reader) {
+					try {
+						while (true) {
+							const { done, value } = await reader.read();
+							if (done) {
+								break;
+							}
+
+							const text = decoder.decode(value, { stream: true });
+							const lines = text.split("\n\n");
+
+							for (const line of lines) {
+								if (line.startsWith('data: ')) {
+									const { step, data } = JSON.parse(line.slice(6))
+
+									// 根据不同步骤展示不同的信息
+									switch (step) {
+										case 'initial_requirements':
+											await this.say("checkpoint_created")
+											await this.say("text", `正在分析您的需求: "${data}"...`);
+											break;
+										case 'refined_requirements':
+											await this.say("checkpoint_created")
+											await this.say("text", `我理解您的核心需求是: "${data}"`);
+											break;
+										case 'search_keywords':
+											await this.say("checkpoint_created")
+											await this.say("text", `使用以下关键词搜索: ${data.join(", ")}`);
+											break;
+										case 'initial_repositories':
+											await this.say("checkpoint_created")
+											await this.say("text", `初步找到 ${data} 个相关仓库，正在筛选...`);
+											break;
+										case 'unique_repositories':
+											await this.say("checkpoint_created")
+											await this.say("text", `去重后剩余 ${data} 个仓库`);
+											break;
+										case 'recalled_repositories':
+											await this.say("checkpoint_created")
+											await this.say("text", `筛选出最相关的 ${data.length} 个仓库，正在评估仓库1/3...`);
+											break;
+										case 'evaluation_progress':
+											await this.say("checkpoint_created")
+											const { index, total, current }: { index: number, total: number, current: RepoInfo} = data;
+											url += current.html_url + "\n\n"
+											await this.say("text", `第${index}个仓库的评估结果是\n\n${buildRepoInfoString(current)}`);
+											if (data.index !== 3) {
+												await this.say("text", `正在评估仓库 (${index + 1}/${total})...`);
+											}
+											break;
+										case 'final_result':
+											repositories = data;
+											await this.say("checkpoint_created")
+											await this.say("text", `评估完成！`);
+											break;
+									}
+								}
+							}
+						}
+					} catch (error) {
+						console.error("读取流时出错:", error);
+						controller.abort();
+						throw error;
+					}
+				}
+
+				if (repositories.length <= 0) {
+					throw new Error("未找到合适的仓库");
+				}
+				// const githubUrl = repositories[0].html_url;
+
+				await this.say("checkpoint_created");
+
+				// 这里再提问一下用户，让用户选择一个项目进行复用
+				const { text, images } = await this.ask("followup", "检索到的项目已经展示结束，请您选择一个项目进行复用。在您选择后，我们会自动下载项目")
+				await this.say("user_feedback", text ?? "", images)
+
+				_text = text ?? ""
+				_images = images ?? []
+
+		} catch (error) {
+			console.error("搜索GitHub仓库失败:", error)
+			// 如果搜索失败，继续正常的任务流程
+			await this.say("text", "搜索GitHub仓库失败")
+		}
+		return { repositories, url, _text, _images };
+	}
+
 	/**
 	 * 【主线】递归地发出 Cline 请求。一些值得注意的点：
 	 * 1. 解析上一轮递归中的 userContent（目前只解析 "@" 辅助功能）和当前的环境信息，用解析结果更新 userContent
@@ -3305,6 +3540,7 @@ export class Cline {
 				}
 			}
 		}
+
 		if (!jumpFlag) {
 
 		if (isFirstRequest) {
@@ -3379,23 +3615,38 @@ export class Cline {
 				return false
 			}
 			if (messageBlock.type === "text" && messageBlock.text.includes("<repo_crawler>")) {
-				console.log("爬虫工具调用")
-				// 如果用户内容中包含 "<repo_crawler>"，则需要清除掉 "<repo_crawler>" 避免重复匹配
-				let newContent = messageBlock.text.replaceAll(/(<repo_crawler>|<\/repo_crawler>)/g, "")
-				messageBlock.text = newContent
-				await this.say("text", messageBlock.text)
-				// 这里再提问一下用户，让用户选择一个项目进行复用
-				const { text, images } = await this.ask("followup", "检索到的项目已经展示结束，请您选择一个项目进行复用。在您选择后，我们会自动下载项目")
-				await this.say("user_feedback", text ?? "", images)
-				// 接下来需要替换 <task> 标签中的任务文本。
-				// 一般默认 <repo_crawler> 所在的块就是 <task> 所在的块，但是之后还是内层循环查找一下比较好
-				let newTask = `<task>\n${text}。请使用 git clone 命令下载这个仓库，并使用 code 命令，在当前 VS Code 工作区中打开这个仓库\n</task>`
-				newContent = messageBlock.text.replace(/<task>[\s\S]*<\/task>/, newTask);
-				messageBlock.text = newContent
-				// 弹出重复的 environmentDetails，因为在新的一次递归中会重新加载环境信息
-				userContent.pop()
-				// 用新的 userContent 来递归
-				await this.recursivelyMakeClineRequests(userContent, includeFileDetails, isNewTask)
+				// /s 修饰符表示 . 匹配任何字符，包括换行符
+				const match = messageBlock.text.match(/<repo_crawler>(.*?)<\/repo_crawler>/s);
+				const req = match ? match[1].trim() : '';
+				console.log("用户原始需求：", req)
+
+				if (req) {
+					// 清除掉 "<repo_crawler>" 避免重复匹配
+					let newContent = messageBlock.text.replaceAll(/(<repo_crawler>|<\/repo_crawler>)/g, "")
+
+					// 处理 repo_crawler 工具调用
+					const { repositories, url, _text, _images } = await this.handleRepoSearchAgent(req)
+
+					if (repositories.length > 0) {
+						// 把仓库的地址信息加到 newContent 中
+						newContent += "\n\n" + url
+						messageBlock.text = newContent					
+						
+						// 接下来需要替换 <task> 标签中的任务文本。
+						// 一般默认 <repo_crawler> 所在的块就是 <task> 所在的块，但是之后还是内层循环查找一下比较好
+						let newTask = `<task>\n${_text}。请使用 git clone 命令下载这个仓库，并使用 code 命令，在当前 VS Code 工作区中打开这个仓库\n</task>`
+						newContent = messageBlock.text.replace(/<task>[\s\S]*<\/task>/, newTask);
+						messageBlock.text = newContent
+						// 弹出重复的 environmentDetails，因为在新的一次递归中会重新加载环境信息
+						userContent.pop()
+						// 用新的 userContent 来递归
+						await this.recursivelyMakeClineRequests(userContent, includeFileDetails, isNewTask)
+					} else {
+						// 没有找到相关仓库
+						await this.say("text", "对不起，没有找到相关仓库")
+					}					
+				}
+				// TODO 请求为空时，提醒用户输入
 				return true
 			}
 		}
@@ -3697,10 +3948,9 @@ export class Cline {
 			// This is a temporary solution to dynamically load context mentions from tool results. It checks for the presence of tags that indicate that the tool was rejected and feedback was provided (see formatToolDeniedFeedback, attemptCompletion, executeCommand, and consecutiveMistakeCount >= 3) or "<answer>" (see askFollowupQuestion), we place all user generated content in these tags so they can effectively be used as markers for when we should parse mentions). However if we allow multiple tools responses in the future, we will need to parse mentions specifically within the user content tags.
 			// (Note: this caused the @/ import alias bug where file contents were being parsed as well, since v2 converted tool results to text blocks)
 
-			// NOTE: 这是从工具结果中动态加载上下文 mentions 的临时解决方案。它会检查是否存在指示工具被拒绝并提供反馈的标签（参见 formatToolDeniedFeedback、attemptCompletion、executeCommand 和 consecutiveMistakeCount >= 3） 或 “<answer>”（参见 askFollowupQuestion），我们将所有用户生成的内容放在这些标签中，以便它们可以有效地用作何时应该解析提及的标记）。但是，如果我们将来允许多个工具响应，我们将需要专门解析用户内容标签中的提及。
-			// （注意：这会导致 @/ import 别名错误，其中文件内容也被解析，因为 v2 将工具结果转换为文本块）
+			// 简单来说，因为在别的地方（具体函数见英文注释）会把 1.用户拒绝工具调用并提供反馈 或者 2.回答 cline 的 followup question 的内容 放在标签内，这样就会有四种标签 表示用户输入了内容。
+			// 这个函数就是要解析这些标签内的潜在的 @mentions
 			Promise.all(
-				// NOTE: 解析 content 中的每个对象中可能存在的 mentions（@）
 				userContent.map(async (block) => {
 					if (block.type === "text") {
 						// We need to ensure any user generated content is wrapped in one of these tags so that we know to parse mentions

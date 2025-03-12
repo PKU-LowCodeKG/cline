@@ -118,7 +118,6 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 		} catch (error) {
 			// 捕获启动浏览器时的错误
 			launchBrowserError = error as Error
-			// 在VS Code窗口中显示错误消息，提示用户获取URL内容时出错
 			vscode.window.showErrorMessage(`Error fetching content for ${urlMention}: ${error.message}`)
 		}
 	}
@@ -130,11 +129,9 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 			let result: string
 			// 如果启动浏览器时出现错误
 			if (launchBrowserError) {
-				// 结果显示为获取内容时的错误信息
 				result = `Error fetching content: ${launchBrowserError.message}`
 			} else {
 				try {
-					// 使用UrlContentFetcher工具从URL获取内容并转换为Markdown格式
 					const markdown = await urlContentFetcher.urlToMarkdown(mention)
 					result = markdown
 				} catch (error) {
@@ -142,7 +139,6 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 					result = `Error fetching content: ${error.message}`
 				}
 			}
-			// 将URL的内容或错误信息以特定的标签格式追加到解析后的文本中
 			parsedText += `\n\n<url_content url="${mention}">\n${result}\n</url_content>`
 		}
 		// 如果提及内容以 "/" 开头（插件前端 @Folder 或者 @File）
@@ -152,19 +148,16 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 			try {
 				// 获取文件或文件夹的内容
 				const content = await getFileOrFolderContent(mentionPath, cwd)
+				// 以 "/" 结尾的路径表示文件夹，否则表示文件
 				if (mention.endsWith("/")) {
-					// 如果是文件夹，将文件夹内容以特定的标签格式追加到解析后的文本中
 					parsedText += `\n\n<folder_content path="${mentionPath}">\n${content}\n</folder_content>`
 				} else {
-					// 如果是文件，将文件内容以特定的标签格式追加到解析后的文本中
 					parsedText += `\n\n<file_content path="${mentionPath}">\n${content}\n</file_content>`
 				}
 			} catch (error) {
 				if (mention.endsWith("/")) {
-					// 如果是文件夹，将获取文件夹内容时的错误信息以特定的标签格式追加到解析后的文本中
 					parsedText += `\n\n<folder_content path="${mentionPath}">\nError fetching content: ${error.message}\n</folder_content>`
 				} else {
-					// 如果是文件，将获取文件内容时的错误信息以特定的标签格式追加到解析后的文本中
 					parsedText += `\n\n<file_content path="${mentionPath}">\nError fetching content: ${error.message}\n</file_content>`
 				}
 			}
@@ -174,10 +167,8 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 			try {
 				// 获取工作区的问题诊断信息
 				const problems = getWorkspaceProblems(cwd)
-				// 将工作区问题诊断信息以特定的标签格式追加到解析后的文本中
 				parsedText += `\n\n<workspace_diagnostics>\n${problems}\n</workspace_diagnostics>`
 			} catch (error) {
-				// 将获取工作区问题诊断信息时的错误信息以特定的标签格式追加到解析后的文本中
 				parsedText += `\n\n<workspace_diagnostics>\nError fetching diagnostics: ${error.message}\n</workspace_diagnostics>`
 			}
 		}
@@ -186,10 +177,8 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 			try {
 				// 获取最新的终端输出信息
 				const terminalOutput = await getLatestTerminalOutput()
-				// 将终端输出信息以特定的标签格式追加到解析后的文本中
 				parsedText += `\n\n<terminal_output>\n${terminalOutput}\n</terminal_output>`
 			} catch (error) {
-				// 将获取终端输出信息时的错误信息以特定的标签格式追加到解析后的文本中
 				parsedText += `\n\n<terminal_output>\nError fetching terminal output: ${error.message}\n</terminal_output>`
 			}
 		}
@@ -198,10 +187,8 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 			try {
 				// 获取工作目录的Git状态信息
 				const workingState = await getWorkingState(cwd)
-				// 将工作目录的Git状态信息以特定的标签格式追加到解析后的文本中
 				parsedText += `\n\n<git_working_state>\n${workingState}\n</git_working_state>`
 			} catch (error) {
-				// 将获取工作目录Git状态信息时的错误信息以特定的标签格式追加到解析后的文本中
 				parsedText += `\n\n<git_working_state>\nError fetching working state: ${error.message}\n</git_working_state>`
 			}
 		}
@@ -210,10 +197,8 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 			try {
 				// 获取指定Git提交的详细信息
 				const commitInfo = await getCommitInfo(mention, cwd)
-				// 将Git提交信息以特定的标签格式追加到解析后的文本中
 				parsedText += `\n\n<git_commit hash="${mention}">\n${commitInfo}\n</git_commit>`
 			} catch (error) {
-				// 将获取Git提交信息时的错误信息以特定的标签格式追加到解析后的文本中
 				parsedText += `\n\n<git_commit hash="${mention}">\nError fetching commit info: ${error.message}\n</git_commit>`
 			}
 		}
@@ -241,11 +226,15 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 		else if (mention.startsWith("repoCrawler")) {
 			// 使用正则表达式从mention中提取 用户希望爬虫检索的需求
 			const req = mention.slice(11)
-			console.log(`RepoCrawler Test: ${req}`)
+
+			// TODO 将 @repoCrawler 的逻辑在这里实现的构想
+			// 1. parseMentions 函数需要增加一个参数 ，用于传递 cline 实例，从而使用 ask 和 say
+			// 2. 因为这里解析的文本就是 <task> 所在的内容，所以这里在 parsedText 中查找理论上也是可以直接替换掉原有任务的
 
 			try {
-				const reusableRepoList = await getReusableRepoListFromReq(req)
-				parsedText += `\n\n<repo_crawler>\n${reusableRepoList}\n</repo_crawler>`
+				// const reusableRepoList = await getReusableRepoListFromReq(req)
+				// parsedText += `\n\n<repo_crawler>\n${reusableRepoList}\n</repo_crawler>`
+				parsedText += `\n\n<repo_crawler>\n${req}\n</repo_crawler>`
 			} catch (error) {
 				parsedText += `\n\n<repo_crawler>\nError fetching summary: ${error.message}\n</repo_crawler>`
 			}
