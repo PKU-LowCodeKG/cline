@@ -1332,10 +1332,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 
 	// MCP
 
-
-	/**
-	 * 根据操作系统的不同，返回用户的文档目录路径。只在MCP中用到
-	 */
+	/* 根据操作系统的不同，返回用户的文档目录路径。只在MCP中用到 */
 	async getDocumentsPath(): Promise<string> {
 		if (process.platform === "win32") {
 			try {
@@ -1395,6 +1392,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	}
 
 	// VSCode LM API
+
 	private async getVsCodeLmModels() {
 		try {
 			const models = await vscode.lm.selectChatModels({})
@@ -1887,6 +1885,7 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 	}
 
 	// Task history
+
 
 	/**
 	 * 根据任务ID获取任务相关的详细信息。
