@@ -817,7 +817,7 @@ export class Cline {
 			let result = "";
 
 			// 添加名称和URL
-			if (evaluation.url) result += `仓库地址: ${evaluation.html_url}\n\n`;
+			if (evaluation.html_url) result += `仓库地址: ${evaluation.html_url}\n\n`;
 
 			// 添加评分 
 			if (evaluation.score !== undefined) {
