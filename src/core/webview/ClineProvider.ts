@@ -168,7 +168,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 
 	/**
 	 * 构造函数用于初始化ClineProvider实例及其核心组件
-	 * 初始化时，向输出通道添加一条日志，将当前实例添加到活动实例集合中，并创建 WorkspaceTracker、McpHub 和 FirebaseAuthManager 实例。
+	 * 初始化时，向输出通道添加一条日志，将当前实例添加到活动实例集合中，并创建 WorkspaceTracker、McpHub 实例。
 	 * @param context 扩展的上下文，用于访问扩展的状态和资源
 	 * @param outputChannel 输出通道，用于显示消息和日志
 	 */
@@ -182,9 +182,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		this.outputChannel.appendLine("ClineProvider instantiated")
 		// 将当前实例添加到活跃实例的集合中，以便于管理和追踪
 		ClineProvider.activeInstances.add(this)
-		// 初始化WorkspaceTracker，用于跟踪工作区的状态和变化
 		this.workspaceTracker = new WorkspaceTracker(this)
-		// 初始化McpHub，用于处理与MCP（Microservice Communication Protocol）相关的操作
 		this.mcpHub = new McpHub(this)
 
 		// Clean up legacy checkpoints
@@ -357,7 +355,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		)
 
 		// if the extension is starting a new session, clear previous task state
-		// 如果扩展正在启动新会话，清除之前的任务状态
 		this.clearTask()
 
 		this.outputChannel.appendLine("Webview view resolved")
@@ -365,7 +362,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 
 
 	/**
-	 * 【主线】使用指定的任务和可选的图片初始化客户端。
+	 * 【主线】使用指定的任务和可选的图片初始化 Cline 实例。
 	 * 该函数确保在启动新任务之前清除任何现有任务，然后获取必要的状态以创建新的 `Cline` 实例。
 	 */
 	async initClineWithTask(task?: string, images?: string[]) {
@@ -599,11 +596,8 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						await this.postStateToWebview()
 						break
 					case "webviewDidLaunch":
-						// Webview 启动时，发送状态信息到 Webview
 						this.postStateToWebview()
-						// 填充文件路径（不等待完成）
 						this.workspaceTracker?.populateFilePaths() // don't await
-						// 获取当前主题并发送到 Webview
 						getTheme().then((theme) =>
 							this.postMessageToWebview({
 								type: "theme",
@@ -611,7 +605,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 							}),
 						)
 						// post last cached models in case the call to endpoint fails
-						// 发送缓存的 OpenRouter 模型信息
 						this.readOpenRouterModels().then((openRouterModels) => {
 							if (openRouterModels) {
 								this.postMessageToWebview({
@@ -655,6 +648,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 							telemetryService.updateTelemetryState(isOptedIn)
 						})
 						break
+
 					// 【主线】前端发送的消息类型为 "newTask" 时，初始化新的任务
 					case "newTask":
 						// Code that should run in response to the hello message command
@@ -665,7 +659,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						// Could also do this in extension .ts
 						//this.postMessageToWebview({ type: "text", text: `Extension: ${Date.now()}` })
 						// initializing new instance of Cline will make sure that any agentically running promises in old instance don't affect our new task. this essentially creates a fresh slate for the new task
-						// 初始化一个新的 Cline 实例以处理新任务
 						await this.initClineWithTask(message.text, message.images)
 						break
 					case "apiConfiguration":
@@ -704,23 +697,21 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 					// 		this.cline.browserSession.relaunchChromeDebugMode()
 					// 	}
 					// 	break
+
 					// 【主线】处理 Webview 的响应消息
 					case "askResponse":
 						this.cline?.handleWebviewAskResponse(message.askResponse!, message.text, message.images)
 						break
 					case "clearTask":
 						// newTask will start a new task with a given task text, while clear task resets the current session and allows for a new task to be started
-						// 清除当前任务，重置会话状态
 						await this.clearTask()
 						await this.postStateToWebview()
 						break
 					case "didShowAnnouncement":
-						// 更新最后显示的公告 ID
 						await this.updateGlobalState("lastShownAnnouncementId", this.latestAnnouncementId)
 						await this.postStateToWebview()
 						break
 					case "selectImages":
-						// 选择图片并发送到 Webview
 						const images = await selectImages()
 						await this.postMessageToWebview({
 							type: "selectedImages",
@@ -728,8 +719,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						})
 						break
 					case "exportCurrentTask":
-						// 导出当前任务
-						// ?. 可选连接符
 						const currentTaskId = this.cline?.taskId
 						if (currentTaskId) {
 							this.exportTaskWithId(currentTaskId)
@@ -737,19 +726,15 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						break
 					// 【主线】根据任务id 显示历史任务
 					case "showTaskWithId":
-						// 显示指定 ID 的任务 !为非空断言符
 						this.showTaskWithId(message.text!)
 						break
 					case "deleteTaskWithId":
-						// 删除指定 ID 的任务
 						this.deleteTaskWithId(message.text!)
 						break
 					case "exportTaskWithId":
-						// 导出指定 ID 的任务
 						this.exportTaskWithId(message.text!)
 						break
 					case "resetState":
-						// 重置全局状态
 						await this.resetState()
 						break
 					case "requestOllamaModels":
@@ -787,7 +772,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						this.postMessageToWebview({ type: "openAiModels", openAiModels })
 						break
 					case "openImage":
-						// 打开指定路径的图片
 						openImage(message.text!)
 						break
 					case "openInBrowser":
@@ -802,11 +786,9 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						this.checkIsImageUrl(message.text!)
 						break
 					case "openFile":
-						// 打开指定路径的文件
 						openFile(message.text!)
 						break
 					case "openMention":
-						// 打开提及的内容
 						openMention(message.text)
 						break
 					case "checkpointDiff": {
@@ -818,7 +800,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 					}
 					case "checkpointRestore": {
 						// 恢复到指定检查点
-						// 取消当前任务，避免任务状态冲突
 						await this.cancelTask() // we cannot alter message history say if the task is active, as it could be in the middle of editing a file or running a command, which expect the ask to be responded to rather than being superceded by a new message eg add deleted_api_reqs
 						// cancel task waits for any open editor to be reverted and starts a new cline instance
 						if (message.number) {
@@ -843,21 +824,17 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						break
 					}
 					case "cancelTask":
-						// 取消当前任务
 						this.cancelTask()
 						break
 					case "getLatestState":
-						// 获取并发送最新状态到 Webview
 						await this.postStateToWebview()
 						break
 					case "accountLoginClicked": {
-						// 处理账户登录点击事件
 						// Generate nonce for state validation
 						const nonce = crypto.randomBytes(32).toString("hex")
 						await this.storeSecret("authNonce", nonce)
 
 						// Open browser for authentication with state param
-						// 打开浏览器进行身份验证
 						console.log("Login button clicked in account page")
 						console.log("Opening auth page with state param")
 
@@ -870,7 +847,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						break
 					}
 					case "accountLogoutClicked": {
-						// 处理账户登出点击事件
 						await this.handleSignOut()
 						break
 					}
@@ -879,7 +855,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						break
 					}
 					case "openMcpSettings": {
-						// 打开 MCP 设置文件
 						const mcpSettingsFilePath = await this.mcpHub?.getMcpSettingsFilePath()
 						if (mcpSettingsFilePath) {
 							openFile(mcpSettingsFilePath)
@@ -959,7 +934,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						break
 					}
 					case "toggleToolAutoApprove": {
-						// 切换工具的自动批准状态
 						try {
 							await this.mcpHub?.toggleToolAutoApprove(message.serverName!, message.toolName!, message.autoApprove!)
 						} catch (error) {
@@ -968,7 +942,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						break
 					}
 					case "restartMcpServer": {
-						// 重启 MCP 服务器
 						try {
 							await this.mcpHub?.restartConnection(message.text!)
 						} catch (error) {
@@ -1012,7 +985,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						break
 					}
 					case "openExtensionSettings": {
-						// 打开扩展设置页面
 						const settingsFilter = message.text || ""
 						await vscode.commands.executeCommand(
 							"workbench.action.openSettings",
@@ -1214,15 +1186,13 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	}
 
 	async cancelTask() {
-		// 检查当前是否存在任务实例
 		if (this.cline) {
 			// 获取与当前任务ID相关的历史项
 			const { historyItem } = await this.getTaskWithId(this.cline.taskId)
+			// 尝试中止任务
 			try {
-				// 尝试中止任务
 				await this.cline.abortTask()
 			} catch (error) {
-				// 如果中止任务失败，记录错误日志
 				console.error("Failed to abort task", error)
 			}
 			// 等待任务状态变为可中止状态，或者超时
@@ -1236,7 +1206,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 					timeout: 3_000,
 				},
 			).catch(() => {
-				// 如果等待超时，记录错误日志
 				console.error("Failed to abort task")
 			})
 
@@ -1245,12 +1214,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 				// 'abandoned' will prevent this cline instance from affecting future cline instance gui. this may happen if its hanging on a streaming request
 				this.cline.abandoned = true
 			}
-			// 使用历史项重新初始化任务实例，确保任务状态被正确重置
-			/**
-			 * 清理任务状态：清除当前任务实例的残留状态或资源。
-			 * 保留历史项：使用 historyItem 保留任务的历史数据（如任务ID、配置等），确保重新初始化的任务实例包含必要的信息。
-			 * 重置任务环境：为后续操作提供一个干净的任务实例，避免之前的状态影响后续行为。
-			 */
+
 			await this.initClineWithHistoryItem(historyItem) // clears task again, so we need to abortTask manually above
 			// await this.postStateToWebview() // new Cline instance will post state when it's ready. having this here sent an empty messages array to webview leading to virtuoso having to reload the entire list
 		}
@@ -1934,14 +1898,7 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 	 * 该函数会从全局状态中获取任务历史记录，并根据提供的任务ID查找对应的任务项。
 	 * 如果找到任务项，会进一步获取任务目录路径、API对话历史文件路径、UI消息文件路径，
 	 * 并读取API对话历史文件内容。如果任务不存在，则从状态中删除该任务ID并抛出错误。
-	 *
-	 * 在 Cline.ts 中的 recursivelyMakeClineRequests 用到
-	 * 在本文件中 showTaskWithId exportTaskWithId deleteTaskWithId cancelTask 用到
-	 *
 	 * @param id - 任务的唯一标识符。
-	 * @returns 返回一个Promise，解析为一个包含任务历史项、任务目录路径、API对话历史文件路径、
-	 *          UI消息文件路径以及API对话历史记录的对象。
-	 * @throws 如果任务未找到，抛出错误 "Task not found"。
 	 */
 	async getTaskWithId(id: string): Promise<{
 		historyItem: HistoryItem
