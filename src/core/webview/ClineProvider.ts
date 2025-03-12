@@ -69,6 +69,7 @@ type SecretKey =
 	| "xaiApiKey"
 
 
+
 /**
  * 定义了全局状态的键名集合，用于标识系统配置中的各项设置。
  * 这些键名涵盖了API提供商、模型ID、区域设置等配置项。
@@ -117,6 +118,8 @@ type GlobalStateKey =
 	| "asksageApiUrl"
 	| "thinkingBudgetTokens"
 
+
+
 /**
  * Cline 的全局文件名
  * 1. 在 Windows 上，`context.globalStorageUri.fsPath` 为：
@@ -146,24 +149,21 @@ export const GlobalFileNames = {
  *
  * 在插件启动时创建一个 ClineProvider 实例，并在插件关闭时销毁该实例。
  *
- * 通过 ClineProvider 实例，可以用两种方式创建一个 Cline 实例作为其私有属性，用于处理用户的任务请求。
+ * ClineProvider 实例用两种方式创建一个 Cline 实例作为其私有属性，用于处理用户的任务请求（新建任务/继续旧任务）。
  */
 export class ClineProvider implements vscode.WebviewViewProvider {
-	// 静态只读属性 用于标识试图和面板
+	/** 标识视图和面板 */
 	public static readonly sideBarId = "claude-dev.SidebarProvider" // used in package.json as the view's id. This value cannot be changed due to how vscode caches views based on their id, and updating the id would break existing instances of the extension.
 	public static readonly tabPanelId = "claude-dev.TabPanelProvider"
-	/** ClineProvider 类的静态属性集合，用于存储所有已经创造的 ClineProvider 实例 */
-	// 静态集合 用于标识当前活动实例
+	/** ClineProvider 类的静态属性集合，用于存储所有正在活跃的 ClineProvider 实例 */
 	private static activeInstances: Set<ClineProvider> = new Set()
-	// 数组 用于存储当前的可释放资源
 	private disposables: vscode.Disposable[] = []
-	// view和cline为可选属性 分别表示webview视图和Cline对象 指的是可以为undefined
 	private view?: vscode.WebviewView | vscode.WebviewPanel
 	private cline?: Cline
-	// workspaceTracker和mcpHub为可选属性 分别表示工作区跟踪器与MCP中心
 	workspaceTracker?: WorkspaceTracker
 	mcpHub?: McpHub
 	private latestAnnouncementId = "feb-19-2025" // update to some unique identifier when we add a new announcement
+
 
 	/**
 	 * 构造函数用于初始化ClineProvider实例及其核心组件
@@ -203,10 +203,9 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	 * 此方法会释放各种资源和事件监听器。
 	 */
 	async dispose() {
-		// 记录开始释放 ClineProvider 的日志
 		this.outputChannel.appendLine("Disposing ClineProvider...")
 
-		// 清除任务并记录日志 调用 clearTask 方法
+		// 清除任务并记录日志
 		await this.clearTask()
 		this.outputChannel.appendLine("Cleared task")
 
@@ -235,7 +234,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		ClineProvider.activeInstances.delete(this)
 	}
 
-	// 处理用户登出的方法
 	async handleSignOut() {
 		try {
 			await this.storeSecret("clineApiKey", undefined)
@@ -243,34 +241,24 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			await this.postStateToWebview()
 			vscode.window.showInformationMessage("Successfully logged out of Cline")
 		} catch (error) {
-			// 如果登出失败，显示错误信息
 			vscode.window.showErrorMessage("Logout failed")
 		}
 	}
 
-	/**
-	 * 以 "userInfo" 为 key，设置并更新全局状态的用户信息。
-	 *
-	 * 该函数接收一个可选的用户信息对象，并将其更新到全局状态中。用户信息对象包含以下可选属性：
-	 * - displayName: 用户的显示名称，类型为字符串或null。
-	 * - email: 用户的电子邮件地址，类型为字符串或null。
-	 * - photoURL: 用户的头像URL，类型为字符串或null。
-	 *
-	 * @param info - 可选参数，包含用户信息的对象。如果未提供，则全局状态中的用户信息将被更新为undefined。
-	 */
+
 	async setUserInfo(info?: { displayName: string | null; email: string | null; photoURL: string | null }) {
 		await this.updateGlobalState("userInfo", info)
 	}
+
+
 	/**
-	 * 获取当前可见的 ClineProvider 实例。
-	 * 该函数会遍历所有活动的 ClineProvider 实例，并返回最后一个可见的实例。 快速定位当前可见的实例。
+	 * 遍历所有正在活跃的 ClineProvider 实例，并返回最后一个“视图”可见的实例。
 	 * 如果没有可见的实例，则返回 undefined。
-	 * @returns {ClineProvider | undefined} 返回最后一个可见的 ClineProvider 实例，如果没有可见实例则返回 undefined。
 	 */
 	public static getVisibleInstance(): ClineProvider | undefined {
-		// 从 activeInstances 中查找最后一个可见的实例
 		return findLast(Array.from(this.activeInstances), (instance) => instance.view?.visible === true)
 	}
+
 
 	/**
 	 * 【主线】解析和配置 VSCode 的 Webview 视图。
@@ -373,19 +361,17 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 
 		this.outputChannel.appendLine("Webview view resolved")
 	}
+
+
 	/**
 	 * 【主线】使用指定的任务和可选的图片初始化客户端。
 	 * 该函数确保在启动新任务之前清除任何现有任务，然后获取必要的状态以创建新的 `Cline` 实例。
-	 * @param {string} [task] - 要初始化的任务。这是一个可选参数，如果未提供，则不设置任务。
-	 * @param {string[]} [images] - 与任务相关的图片数组。这是一个可选参数，如果未提供，则不设置图片。
 	 */
 	async initClineWithTask(task?: string, images?: string[]) {
-		// 清除现有任务，确保在启动新任务之前没有任务存在
 		await this.clearTask() // ensures that an existing task doesn't exist before starting a new one, although this shouldn't be possible since user must clear task before starting a new one
 		// 获取当前状态，包括 API 配置、自定义指令、自动批准设置、浏览器设置和聊天设置
 		const { apiConfiguration, customInstructions, autoApprovalSettings, browserSettings, chatSettings } =
 			await this.getState()
-		// 使用获取的状态和参数创建新的 `Cline` 实例
 		this.cline = new Cline(
 			this,
 			apiConfiguration,
@@ -397,18 +383,17 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			images,
 		)
 	}
+
+
 	/**
 	 * 【主线】初始化带有历史项的 Cline 实例。
 	 * 该函数首先清除当前任务，然后从状态中获取配置和设置，最后使用这些配置和设置以及传入的历史项创建一个新的 Cline 实例，用于恢复之前的任务。
-	 * @param historyItem - 历史项，用于初始化 Cline 实例时传递。
 	 */
 	async initClineWithHistoryItem(historyItem: HistoryItem) {
-		// 清除当前任务，确保在初始化新实例之前没有遗留的任务。
 		await this.clearTask()
 		const { apiConfiguration, customInstructions, autoApprovalSettings, browserSettings, chatSettings } =
 			await this.getState()
 
-		// 使用获取的配置和设置以及传入的历史项初始化一个新的 Cline 实例。
 		this.cline = new Cline(
 			this,
 			apiConfiguration,
@@ -421,6 +406,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			historyItem,
 		)
 	}
+
 
 	// Send any JSON serializable data to the react app
 	/**
@@ -596,7 +582,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 
 	/**
 	 * 【主线】设置一个事件侦听器来侦听从 webview 上下文传递的消息，并根据收到的消息执行代码。
-	 * 其实就是把 `webview.onDidReceiveMessage()` 封装了一层
+	 * 其实就是封装了 `webview.onDidReceiveMessage()`
 	 *
 	 * Sets up an event listener to listen for messages passed from the webview context and
 	 * executes code based on the message that is received.
@@ -1327,35 +1313,28 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			// await this.postStateToWebview() // new Cline instance will post state when it's ready. having this here sent an empty messages array to webview leading to virtuoso having to reload the entire list
 		}
 	}
+
+
 	/**
-	 * 更新自定义指令。
-	 * 该函数用于更新全局状态中的自定义指令，并确保相关的客户端实例（如果存在）也同步更新。
+	 * 更新全局状态中的自定义指令，并同步更新相关的 Cline 实例（如果存在）。
 	 * 最后，将更新后的状态发送到Webview。
 	 * @param {string} [instructions] - 可选参数，表示新的自定义指令内容。如果未提供或为空字符串，则视为清除自定义指令。
 	 */
 	async updateCustomInstructions(instructions?: string) {
 		// User may be clearing the field
-		// 更新全局状态中的自定义指令，如果instructions为空则设置为undefined
 		await this.updateGlobalState("customInstructions", instructions || undefined)
 
-		// 如果存在客户端实例，则同步更新其自定义指令
 		if (this.cline) {
 			this.cline.customInstructions = instructions || undefined
 		}
-		// 将更新后的状态发送到Webview
 		await this.postStateToWebview()
 	}
 
 	// MCP
 
+
 	/**
-	 * 获取当前用户的文档目录路径。 只在MCP中用到
-	 *
-	 * 该函数根据操作系统的不同，返回用户的文档目录路径。在Windows系统上，它会尝试通过PowerShell命令获取
-	 * 准确的文档路径。如果获取失败，则回退到默认的 `~/Documents` 路径。在POSIX系统（如macOS、Linux等）
-	 * 上，默认返回 `~/Documents` 路径。
-	 *
-	 * @returns {Promise<string>} 返回一个Promise，解析为用户文档目录的路径。
+	 * 根据操作系统的不同，返回用户的文档目录路径。只在MCP中用到
 	 */
 	async getDocumentsPath(): Promise<string> {
 		if (process.platform === "win32") {
@@ -1394,11 +1373,9 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		return path.join(os.homedir(), "Documents")
 	}
 
-	/** 确保 `~/Documents/Cline/MCP` 目录存在。如果目录不存在，则创建该目录。 */
+	/** 确保 `~/Documents/Cline/MCP` 目录存在。如果目录不存在，则递归创建该目录。 */
 	async ensureMcpServersDirectoryExists(): Promise<string> {
-		// 获取用户的文档路径
 		const userDocumentsPath = await this.getDocumentsPath()
-		// 构建目标目录路径
 		const mcpServersDir = path.join(userDocumentsPath, "Cline", "MCP")
 		try {
 			// 尝试创建目录，recursive: true 确保所有父目录也会被创建
@@ -1410,28 +1387,16 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		return mcpServersDir
 	}
 
-	/**
-	 * 确保 [context.globalStorageUri.fsPath]/settings 目录存在。
-	 * 如果目录不存在，则递归创建该目录。
-	 */
+	/** 确保 [context.globalStorageUri.fsPath]/settings 目录存在。如果目录不存在，则递归创建该目录。 */
 	async ensureSettingsDirectoryExists(): Promise<string> {
-		// 拼接 settings 目录的完整路径
 		const settingsDir = path.join(this.context.globalStorageUri.fsPath, "settings")
-		// 递归创建目录，如果目录已存在则不会抛出错误
 		await fs.mkdir(settingsDir, { recursive: true })
 		return settingsDir
 	}
 
 	// VSCode LM API
-	/**
-	 * 获取VS Code语言模型（LM）的聊天模型列表。
-	 * 该函数会尝试从VS Code的API中获取可用的聊天模型，如果获取失败则返回空数组。
-	 *
-	 * @returns {Promise<Array>} 返回一个Promise，解析为聊天模型的数组。如果获取失败或没有模型，则返回空数组。
-	 */
 	private async getVsCodeLmModels() {
 		try {
-			// 从VS Code API中获取 Chat 模型列表
 			const models = await vscode.lm.selectChatModels({})
 			return models || []
 		} catch (error) {
@@ -1441,25 +1406,18 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	}
 
 	// Ollama
-	/**
-	 * 获取Ollama模型的列表。
-	 *
-	 * 该函数通过向指定的Ollama API端点发送请求，获取所有可用的模型名称，并返回去重后的模型名称列表。
-	 *
-	 * @param {string} [baseUrl] - Ollama API的基础URL。如果未提供，则默认使用 `http://localhost:11434`。
-	 * @returns {Promise<string[]>} 返回一个包含所有去重后的模型名称的数组。如果请求失败或URL无效，则返回空数组。
-	 */
+
 	async getOllamaModels(baseUrl?: string) {
 		try {
 			if (!baseUrl) {
-				// 如果未提供baseUrl，则使用默认的本地URL
+				// Ollama 默认的本地 URL
 				baseUrl = "http://localhost:11434"
 			}
 			if (!URL.canParse(baseUrl)) {
-				// 检查URL是否有效，如果无效则返回空数组
+				// 检查 URL 是否有效，如果无效则返回空数组
 				return []
 			}
-			// 向Ollama API发送请求，获取模型列表
+			// 向 Ollama API 发送请求，获取模型列表
 			const response = await axios.get(`${baseUrl}/api/tags`)
 			const modelsArray = response.data?.models?.map((model: any) => model.name) || []
 			const models = [...new Set<string>(modelsArray)]
@@ -1470,16 +1428,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	}
 
 	// LM Studio
-	/**
-	 * 获取LM Studio模型列表。
-	 *
-	 * 该函数通过向指定的基础URL发送GET请求，获取LM Studio的模型列表，并返回去重后的模型ID数组。
-	 * 如果未提供基础URL，则默认使用`http://localhost:1234`。
-	 * 如果URL无法解析或请求失败，则返回空数组。
-	 *
-	 * @param {string} [baseUrl] - 可选参数，LM Studio服务的基础URL。如果未提供，则使用默认值`http://localhost:1234`。
-	 * @returns {Promise<string[]>} 返回一个Promise，解析为去重后的模型ID数组。如果请求失败或URL无效，则返回空数组。
-	 */
+
 	async getLmStudioModels(baseUrl?: string) {
 		try {
 			if (!baseUrl) {
@@ -1498,20 +1447,14 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	}
 
 	// Auth
-	/**
-	 * 验证授权状态是否有效。
-	 *
-	 * 在extension.ts中使用到
-	 *
-	 * 该函数用于验证传入的授权状态 `state` 是否与存储的 `authNonce` 值匹配。
-	 * 如果匹配，则清除存储的 `authNonce` 并返回 `true`，否则返回 `false`。
-	 *
-	 * @param state - 待验证的授权状态字符串，可能为 `null`。
-	 * @returns 返回一个 `Promise<boolean>`，表示授权状态是否有效。
-	 */
 
+
+	/**
+	 * 验证授权状态是否有效：查看传入的参数 授权状态 `state` 是否与存储的 `authNonce` 值匹配。
+	 * 如果匹配，则清除存储的 `authNonce` 并返回 `true`；否则返回 `false`。
+	 * @param state - 待验证的授权状态字符串，可能为 `null`。
+	 */
 	public async validateAuthState(state: string | null): Promise<boolean> {
-		// 从存储中获取当前的 `authNonce` 值
 		const storedNonce = await this.getSecret("authNonce")
 
 		// 如果传入的 `state` 为空或与存储的 `authNonce` 不匹配，返回 `false`
@@ -1728,12 +1671,10 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 	}
 
 	// OpenAi
+
+
 	/**
-	 * 获取 OpenAI 模型列表。
-	 * 该函数通过调用指定的 API 地址获取可用的 OpenAI 模型列表，并返回去重后的模型 ID 数组。
-	 *
-	 * 在私有方法 setWebviewMessageListener 中用到
-	 *
+	 * 调用指定的 API 地址获取可用的 OpenAI 模型列表，并返回去重后的模型 ID 数组。
 	 * @param {string} [baseUrl] - OpenAI API 的基础地址，如果未提供则返回空数组。
 	 * @param {string} [apiKey] - OpenAI API 的密钥，用于授权请求，如果未提供则使用无授权的请求。
 	 * @returns {Promise<string[]>} - 返回去重后的模型 ID 数组，如果请求失败或参数无效则返回空数组。
@@ -1763,12 +1704,10 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 	}
 
 	// OpenRouter
+
+
 	/**
-	 * 处理 OpenRouter 的回调，通过授权码获取 API 密钥并更新相关配置。
-	 * 该函数通常用于在用户完成 OpenRouter 授权后，获取 API 密钥并更新全局状态。
-	 *
-	 * 在extension.ts中使用到
-	 *
+	 * 处理 OpenRouter 的回调。在用户完成 OpenRouter 授权后，通过授权码获取 API 密钥并更新相关配置。
 	 * @param {string} code - OpenRouter 授权码，用于交换 API 密钥。
 	 */
 	async handleOpenRouterCallback(code: string) {
@@ -1799,35 +1738,21 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 		}
 		// await this.postMessageToWebview({ type: "action", action: "settingsButtonClicked" }) // bad ux if user is on welcome
 	}
-	/**
-	 * 确保缓存目录存在，如果不存在则创建它。
-	 *
-	 * 该函数会检查并创建缓存目录，确保后续操作可以安全地进行文件存储。
-	 *
-	 * 在下边两个 readOpenRouterModels 和 refreshOpenRouterModels 中用到
-	 * @returns {Promise<string>} 返回缓存目录的绝对路径。
-	 */
+
+	/** 确保 [context.globalStorageUri.fsPath]/cache 目录存在。如果目录不存在，则递归创建该目录。 */
 	private async ensureCacheDirectoryExists(): Promise<string> {
-		// 构建缓存目录的路径，使用全局存储路径和"cache"子目录拼接而成
 		const cacheDir = path.join(this.context.globalStorageUri.fsPath, "cache")
 		await fs.mkdir(cacheDir, { recursive: true })
 		return cacheDir
 	}
+
 	/**
-	 * 读取 OpenRouter 模型信息文件并解析为对象。
-	 *
-	 * 该函数首先确保缓存目录存在，然后检查 OpenRouter 模型信息文件是否存在。
-	 * 如果文件存在，读取文件内容并将其解析为 JSON 对象返回；如果文件不存在，返回 undefined。
-	 *
-	 * 在 setWebviewMessageListener 中用到
-	 *
+	 * 读取 OpenRouter 模型信息文件（openrouter_models.json）并解析为对象。
 	 * @returns {Promise<Record<string, ModelInfo> | undefined>} 返回一个 Promise，解析为包含模型信息的对象，如果文件不存在则返回 undefined。
 	 */
 	async readOpenRouterModels(): Promise<Record<string, ModelInfo> | undefined> {
-		// 获取 OpenRouter 模型信息文件的完整路径
 		const openRouterModelsFilePath = path.join(await this.ensureCacheDirectoryExists(), GlobalFileNames.openRouterModels)
 		const fileExists = await fileExistsAtPath(openRouterModelsFilePath)
-		// 如果文件存在，读取并解析文件内容
 		if (fileExists) {
 			const fileContents = await fs.readFile(openRouterModelsFilePath, "utf8")
 			return JSON.parse(fileContents)
@@ -1836,12 +1761,7 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 	}
 
 	/**
-	 * 刷新并获取OpenRouter的模型信息。
-	 * 该函数会从OpenRouter的API获取最新的模型数据，并将其保存到本地缓存文件中。
-	 * 同时，它会将获取到的模型信息发送到Webview中。
-	 *
-	 * 在 setWebviewMessageListener 中关键字 refreshOpenRouterModels 下用到
-	 *
+	 * 从OpenRouter的API获取最新的模型数据，并将其保存到 openrouter_models.json 中。
 	 * @returns {Promise<Record<string, ModelInfo>>} 返回一个包含所有模型信息的对象，键为模型ID，值为模型信息。
 	 */
 	async refreshOpenRouterModels() {
@@ -1876,7 +1796,6 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 				"per_request_limits": null
 			},
 			*/
-			// 如果API返回的数据有效，则解析并处理模型信息
 			if (response.data?.data) {
 				const rawModels = response.data.data
 				const parsePrice = (price: any) => {
@@ -1968,6 +1887,7 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 	}
 
 	// Task history
+
 	/**
 	 * 根据任务ID获取任务相关的详细信息。
 	 *
@@ -2017,13 +1937,12 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 		await this.deleteTaskFromState(id)
 		throw new Error("Task not found")
 	}
+
+
 	/**
 	 * 根据给定的任务ID显示任务内容。
 	 * 如果任务ID与当前任务ID不同，则获取该任务的历史记录并初始化客户端。
 	 * 最后，向Webview发送消息以触发聊天按钮点击事件。
-	 * 在 setWebviewMessageToWebview 中调用
-	 *
-	 * WebviewMessage.ts中也定义了相应关键字
 	 * @param id - 要显示的任务的唯一标识符。
 	 */
 	async showTaskWithId(id: string) {
@@ -2034,34 +1953,26 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 			await this.initClineWithHistoryItem(historyItem) // clears existing task
 		}
 
-		// 向Webview发送消息，触发聊天按钮点击事件
 		await this.postMessageToWebview({
 			type: "action",
 			action: "chatButtonClicked",
 		})
 	}
 
+
 	/**
-	 * 根据任务ID导出任务数据
-	 *
-	 * 该函数首先通过任务ID获取任务的历史记录和API对话历史，然后调用下载函数将任务数据导出。
-	 * 在 setWebviewMessageToWebview 中调用
-	 *
-	 * WebviewMessage.ts中也定义了相应关键字
+	 * 通过任务ID获取任务的历史记录和API对话历史，然后调用下载函数将任务数据导出。
 	 * @param id - 任务的唯一标识符，用于查找对应的任务数据
 	 */
 	async exportTaskWithId(id: string) {
-		// 获取任务的历史记录和API对话历史
 		const { historyItem, apiConversationHistory } = await this.getTaskWithId(id)
-		// 来自于export-markdown.ts中定义的方法
 		await downloadTask(historyItem.ts, apiConversationHistory)
 	}
+
+
 	/**
 	 * 根据任务ID删除任务及其相关文件。
 	 * 在 setWebviewMessageToWebview 中调用
-	 *
-	 * WebviewMessage.ts中也定义了相应关键字
-	 *
 	 * @param id - 要删除的任务的唯一标识符。
 	 * @returns Promise<void> - 该函数不返回任何值，但会异步执行删除操作。
 	 */
@@ -2106,10 +2017,11 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 
 		await fs.rmdir(taskDirPath) // succeeds if the dir is empty
 	}
+
+
 	/**
 	 * 从全局状态中删除指定ID的任务。
 	 * 该函数会从任务历史中移除该任务，并通知WebView状态已更新。 仅从全局状态中删除任务，不涉及文件系统的操作
-	 *
 	 * @param {string} id - 要删除的任务的唯一标识符。
 	 * @returns {Promise<void>} - 当任务成功删除且WebView已通知时，返回一个Promise。
 	 */
@@ -2123,30 +2035,14 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 		await this.updateGlobalState("taskHistory", updatedTaskHistory)
 
 		// Notify the webview that the task has been deleted
-		// 通知WebView状态已更新，以反映任务的删除。
 		await this.postStateToWebview()
 	}
-	/**
-	 * 将当前状态发送到 Webview。
-	 * 该函数首先获取需要发送到 Webview 的状态，然后通过 `postMessageToWebview` 方法将状态信息发送出去。
-	 * 状态信息包含一个类型字段 "state"，以及实际的状态数据。
-	 *
-	 * @returns {Promise<void>} 该函数返回一个 Promise，在状态成功发送后解析。
-	 */
+
 	async postStateToWebview() {
 		const state = await this.getStateToPostToWebview()
 		this.postMessageToWebview({ type: "state", state })
 	}
-	/**
-	 * 获取当前扩展的状态信息，并将其格式化为适合发送到 Webview 的数据结构。
-	 *
-	 * 该函数从 `getState` 方法中获取当前扩展的配置和用户信息，并将其与一些运行时状态（如当前任务、错误消息等）组合，
-	 * 最终返回一个包含所有必要信息的 `ExtensionState` 对象。
-	 *
-	 * 只在 postStateToWebview 中用到一次
-	 * @returns {Promise<ExtensionState>} 返回一个 Promise，解析为包含扩展状态信息的 `ExtensionState` 对象。
-	 *
-	 */
+
 	async getStateToPostToWebview(): Promise<ExtensionState> {
 		const {
 			apiConfiguration,
@@ -2181,22 +2077,12 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 			vscMachineId: vscode.env.machineId,
 		}
 	}
+
+
 	/**
-	 * 异步清除任务。
-	 *
-	 * 该方法用于中止当前任务并清除对任务对象的引用。
-	 * 首先调用 cline 对象的 abortTask 方法来中止正在进行的任务（如果存在）。
-	 * 然后，清除对 cline 对象的引用，以便在所有 Promise 结束后可以被垃圾回收。
+	 * 中止当前任务并清除对 cline 实例的引用。
 	 */
 	async clearTask() {
-		// abortTask为Cline.ts的实例方法，用于中止正在进行的任务。
-		/**首先将 abort 标志设置为 true，以停止任何自主运行的 Promise。
-		 * 然后调用 terminalManager 的 disposeAll 方法释放所有终端资源。
-		 * 接着调用 urlContentFetcher 的 closeBrowser 方法关闭浏览器。
-		 * 然后调用 browserSession 的 closeBrowser 方法关闭浏览器会话。
-		 * 接着调用 clineIgnoreController 的 dispose 方法释放忽略控制器资源。
-		 * 最后等待 diffViewProvider 的 revertChanges 方法完成，确保目录和文件在重新启动任务之前已恢复到检查点状态。
-		 */
 		this.cline?.abortTask()
 		this.cline = undefined // removes reference to it, so once promises end it will be garbage collected
 	}
@@ -2251,7 +2137,6 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 	 *
 	 * 该函数通过异步方式从全局状态和密钥存储中获取多个配置项，包括API提供者、模型ID、API密钥、AWS配置、OpenAI配置等。
 	 * 它还处理了一些默认值和逻辑，例如为新用户或旧用户设置默认的API提供者。
-	 *
 	 * @returns {Promise<Object>} 返回一个包含所有配置和状态信息的对象，包括API配置、用户信息、任务历史、浏览器设置等。
 	 */
 	async getState() {
@@ -2375,14 +2260,12 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 			this.getGlobalState("thinkingBudgetTokens") as Promise<number | undefined>,
 		])
 
-		// 确定API提供者，如果未存储则根据条件设置默认值
 		let apiProvider: ApiProvider
 		if (storedApiProvider) {
 			apiProvider = storedApiProvider
 		} else {
 			// Either new user or legacy user that doesn't have the apiProvider stored in state
 			// (If they're using OpenRouter or Bedrock, then apiProvider state will exist)
-			// 新用户或旧用户未存储apiProvider状态
 			if (apiKey) {
 				apiProvider = "anthropic"
 			} else {
@@ -2391,7 +2274,6 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 			}
 		}
 
-		// 获取o3Mini模型的推理努力级别配置
 		const o3MiniReasoningEffort = vscode.workspace
 			.getConfiguration("cline.modelSettings.o3Mini")
 			.get("reasoningEffort", "medium")
@@ -2483,41 +2365,21 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 	}
 
 	// global
-	/**
-	 * 更新全局状态中指定键的值。
-	 *
-	 * @param key - 全局状态中的键，类型为 `GlobalStateKey`。
-	 * @param value - 要更新的值，类型为 `any`。
-	 */
+
 	async updateGlobalState(key: GlobalStateKey, value: any) {
 		await this.context.globalState.update(key, value)
 	}
-	/**
-	 * 获取全局状态中指定键的值。
-	 *
-	 * @param key - 全局状态中的键，类型为 `GlobalStateKey`。
-	 * @returns 返回与指定键关联的值，类型为 `any`。
-	 */
+
 	async getGlobalState(key: GlobalStateKey) {
 		return await this.context.globalState.get(key)
 	}
 
 	// workspace
-	/**
-	 * 更新工作区状态中指定键的值。
-	 *
-	 * @param key - 工作区状态中的键，类型为 `string`。
-	 * @param value - 要更新的值，类型为 `any`。
-	 */
+
 	private async updateWorkspaceState(key: string, value: any) {
 		await this.context.workspaceState.update(key, value)
 	}
-	/**
-	 * 获取工作区状态中指定键的值。
-	 *
-	 * @param key - 工作区状态中的键，类型为 `string`。
-	 * @returns 返回与指定键关联的值，类型为 `any`。
-	 */
+
 	private async getWorkspaceState(key: string) {
 		return await this.context.workspaceState.get(key)
 	}
