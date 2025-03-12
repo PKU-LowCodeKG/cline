@@ -62,8 +62,6 @@ import { ClineHandler } from "../api/providers/cline"
 import { ClineProvider, GlobalFileNames } from "./webview/ClineProvider"
 import { DEFAULT_LANGUAGE_SETTINGS, getLanguageKey, LanguageDisplay, LanguageKey } from "../shared/Languages"
 import { telemetryService } from "../services/telemetry/TelemetryService"
-import axios from "axios"
-import { buildRepoInfoString, RepoInfo } from "./repoInfo"
 
 const cwd = vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath).at(0) ?? path.join(os.homedir(), "Desktop") // may or may not exist but fs checking existence would immediately ask for permission which would be bad UX, need to come up with a better solution
 
@@ -3226,235 +3224,6 @@ export class Cline {
 		}
 	}
 
-	// async handleRepoSearchAgent_1(req: string) {
-	// 	let repositories: string | any[] = [];
-	// 	let url: string = "";
-	// 	let _text: string = "";
-	// 	let _images: string[] = [];
-	// 	try {
-	// 		const controller = new AbortController();
-	// 		const signal = controller.signal;
-
-	// 		const response = await axios.post("http://localhost:5000/get_url_stream", 
-	// 			{ "query": req },
-	// 			{
-	// 				responseType: "stream",
-	// 				signal,
-	// 			}
-	// 		);
-
-	// 		// 处理 SSE 流
-	// 		const reader = response.data;
-	// 		const decoder = new TextDecoder();
-
-	// 		// 返回一个 Promise 来等待流数据处理完成
-	// 		await new Promise<void>((resolve, reject) => {
-	// 			reader.on("data", async (chunk: Buffer) => {
-	// 				try {
-	// 					const text = decoder.decode(chunk, { stream: true });
-	// 					const lines = text.split("\n\n");
-
-	// 					for (const line of lines) {
-	// 						if (line.startsWith("data: ")) {
-	// 							const { step, data } = JSON.parse(line.slice(6));
-
-	// 							switch (step) {
-	// 								case "initial_requirements":
-	// 									console.log(`正在分析您的需求: "${data}"...`)
-	// 									await this.say("checkpoint_created")
-	// 									await this.say("text", `正在分析您的需求: "${data}"...`)
-	// 									break;
-	// 								case "refined_requirements":
-	// 									console.log(`正在细化您的需求: "${data}"...`)
-	// 									await this.say("checkpoint_created")
-	// 									await this.say("text", `正在细化您的需求: "${data}"...`)
-	// 									break;
-	// 								case 'search_keywords':
-	// 									console.log(`使用以下关键词搜索: ${data.join(", ")}`)
-	// 									await this.say("checkpoint_created")
-	// 									await this.say("text", `使用以下关键词搜索: ${data.join(", ")}`)
-	// 									break;
-	// 								case 'initial_repositories':
-	// 									console.log(`初步找到 ${data} 个相关仓库，正在筛选...`)
-	// 									await this.say("checkpoint_created")
-	// 									await this.say("text", `初步找到 ${data} 个相关仓库，正在筛选...`)
-	// 									break;
-	// 								case 'unique_repositories':
-	// 									console.log(`去重后剩余 ${data} 个仓库`)
-	// 									await this.say("checkpoint_created")
-	// 									await this.say("text", `去重后剩余 ${data} 个仓库`)
-	// 									break;
-	// 								case 'recalled_repositories':
-	// 									console.log(`筛选出最相关的 ${data.length} 个仓库，正在评估仓库1/3...`)
-	// 									await this.say("checkpoint_created")
-	// 									await this.say("text", `筛选出最相关的 ${data.length} 个仓库，正在评估仓库1/3...`)
-	// 									break;
-	// 								case 'evaluation_progress':
-	// 									const { index, total, current }: { index: number, total: number, current: RepoInfo} = data;
-	// 									console.log(`第${index}个仓库的评估结果是\n\n${current}`)
-	// 									url += current.html_url + "\n\n"
-
-	// 									await this.say("checkpoint_created")
-	// 									await this.say("text", `第${index}个仓库的评估结果是\n\n${buildRepoInfoString(current)}`)
-	// 									if (data.index !== 3) {
-	// 										console.log(`正在评估仓库 (${index + 1}/${data.total})...`);
-	// 										await this.say("text", `正在评估仓库 (${index + 1}/${total})...`)
-	// 									}
-	// 									break;
-	// 								case 'final_result':
-	// 									repositories = data;
-	// 									await this.say("checkpoint_created")
-	// 									await this.say("text", "评估完成！")
-	// 									break;
-	// 							}
-	// 						}
-	// 					}
-	// 				} catch (error) {
-	// 					console.error("解析流数据时出错:", error);
-	// 					controller.abort();
-	// 					reject(error); // Reject the Promise on error
-	// 				}
-	// 			});
-
-	// 			reader.on("end", () => {
-	// 				console.log("流数据已经读取完毕");
-	// 				resolve(); // Resolve the Promise when the stream ends
-	// 			});
-
-	// 			reader.on("error", (error: any) => {
-	// 				console.error("读取流数据时出错:", error);
-	// 				reject(error); // Reject the Promise on error
-	// 			});
-	// 		});
-
-	// 		// 这里再提问一下用户，让用户选择一个项目进行复用
-	// 		const { text, images } = await this.ask("followup", "检索到的项目已经展示结束，请您选择一个项目进行复用。在您选择后，我们会自动下载项目")
-	// 		await this.say("user_feedback", text ?? "", images)
-
-	// 		_text = text ?? ""
-	// 		_images = images ?? []
-	// 	} catch (error) {
-	// 		console.error(error);
-	// 	}
-	// 	console.log("repositories: ", repositories);
-	// 	console.log("url: ", url);
-	// 	return { repositories, url, _text, _images };
-	// }
-
-	async handleRepoSearchAgent(req: string) {
-
-		let repositories: string | any[] = [];
-		let url: string = "";
-		let _text: string = "";
-		let _images: string[] = [];
-		try {
-				const controller = new AbortController();
-				const signal = controller.signal;
-
-				const response = await fetch("http://localhost:5000/get_url_stream", {
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-					},
-					body: JSON.stringify({ "query": req || "React应用" }),
-					signal
-				});
-
-				if (!response.ok) {
-					throw new Error(`HTTP error! status: ${response.status}`);
-				}
-
-				// 处理SSE流
-				const reader = response.body?.getReader();
-				const decoder = new TextDecoder();
-
-				if (reader) {
-					try {
-						while (true) {
-							const { done, value } = await reader.read();
-							if (done) {
-								break;
-							}
-
-							const text = decoder.decode(value, { stream: true });
-							const lines = text.split("\n\n");
-
-							for (const line of lines) {
-								if (line.startsWith('data: ')) {
-									const { step, data } = JSON.parse(line.slice(6))
-
-									// 根据不同步骤展示不同的信息
-									switch (step) {
-										case 'initial_requirements':
-											await this.say("checkpoint_created")
-											await this.say("text", `正在分析您的需求: "${data}"...`);
-											break;
-										case 'refined_requirements':
-											await this.say("checkpoint_created")
-											await this.say("text", `我理解您的核心需求是: "${data}"`);
-											break;
-										case 'search_keywords':
-											await this.say("checkpoint_created")
-											await this.say("text", `使用以下关键词搜索: ${data.join(", ")}`);
-											break;
-										case 'initial_repositories':
-											await this.say("checkpoint_created")
-											await this.say("text", `初步找到 ${data} 个相关仓库，正在筛选...`);
-											break;
-										case 'unique_repositories':
-											await this.say("checkpoint_created")
-											await this.say("text", `去重后剩余 ${data} 个仓库`);
-											break;
-										case 'recalled_repositories':
-											await this.say("checkpoint_created")
-											await this.say("text", `筛选出最相关的 ${data.length} 个仓库，正在评估仓库1/3...`);
-											break;
-										case 'evaluation_progress':
-											await this.say("checkpoint_created")
-											const { index, total, current }: { index: number, total: number, current: RepoInfo} = data;
-											url += current.html_url + "\n\n"
-											await this.say("text", `第${index}个仓库的评估结果是\n\n${buildRepoInfoString(current)}`);
-											if (data.index !== 3) {
-												await this.say("text", `正在评估仓库 (${index + 1}/${total})...`);
-											}
-											break;
-										case 'final_result':
-											repositories = data;
-											await this.say("checkpoint_created")
-											await this.say("text", `评估完成！`);
-											break;
-									}
-								}
-							}
-						}
-					} catch (error) {
-						console.error("读取流时出错:", error);
-						controller.abort();
-						throw error;
-					}
-				}
-
-				if (repositories.length <= 0) {
-					throw new Error("未找到合适的仓库");
-				}
-				// const githubUrl = repositories[0].html_url;
-
-				await this.say("checkpoint_created");
-
-				// 这里再提问一下用户，让用户选择一个项目进行复用
-				const { text, images } = await this.ask("followup", "检索到的项目已经展示结束，请您选择一个项目进行复用。在您选择后，我们会自动下载项目")
-				await this.say("user_feedback", text ?? "", images)
-
-				_text = text ?? ""
-				_images = images ?? []
-
-		} catch (error) {
-			console.error("搜索GitHub仓库失败:", error)
-			// 如果搜索失败，继续正常的任务流程
-			await this.say("text", "搜索GitHub仓库失败")
-		}
-		return { repositories, url, _text, _images };
-	}
 
 	/**
 	 * 【主线】递归地发出 Cline 请求。一些值得注意的点：
@@ -3528,21 +3297,6 @@ export class Cline {
 		// Save checkpoint if this is the first API request
 		const isFirstRequest = this.clineMessages.filter((m) => m.say === "api_req_started").length === 0
 
-		// TODO: 如果我们采用了 @reuse，这里不应该 say("checkpoint_created") 和 say("api_req_started")，而是在后面直接发送 @reuse 的内容
-		let jumpFlag = false
-		for (const messageBlock of userContent) {
-			if (messageBlock.type === "text") {
-				if (messageBlock.text.includes("@reuse") 
-				|| messageBlock.text.includes("@repoCrawler")
-				) {
-					jumpFlag = true
-					break
-				}
-			}
-		}
-
-		if (!jumpFlag) {
-
 		if (isFirstRequest) {
 			await this.say("checkpoint_created") // no hash since we need to wait for CheckpointTracker to be initialized
 		}
@@ -3556,8 +3310,6 @@ export class Cline {
 				request: userContent.map((block) => formatContentBlockToMarkdown(block)).join("\n\n") + "\n\nLoading...",
 			}),
 		)
-
-		}
 
 		// use this opportunity to initialize the checkpoint tracker (can be expensive to initialize in the constructor)
 		// FIXME: right now we're letting users init checkpoints for old tasks, but this could be a problem if opening a task in the wrong workspace
@@ -3591,65 +3343,6 @@ export class Cline {
 		userContent = parsedUserContent
 		// add environment details as its own text block, separate from tool results
 		userContent.push({ type: "text", text: environmentDetails })
-
-		for (const messageBlock of userContent) {
-			// 如果用户内容中包含 "<repo_summary>"，则直接发送 "<repo_summary>" 的内容
-			if (messageBlock.type === "text" && messageBlock.text.includes("<repo_summary>")) {
-				// TODO: 后续如果需要的话，reuse 部分要向 repo_crawler 那样改，现在这样是有问题的
-				await this.say("text", messageBlock.text)
-				// 此时，由于 userContent 中的 @reuse 已经被替换，所以上面的 jumpFlag 在下一次循环中不会被设置为 true
-				// 返回 false 会使得下一轮 userContent 变为
-				// nextUserContent = [
-				// 	{
-				// 		type: "text",
-				// 		text: formatResponse.noToolsUsed(),
-				// 	},
-				// ]
-				// 在第二轮中，由于没有 "api_req_started"，所以会加一条 "checkpoint_created"
-				// 然后 加一条 "api_req_started"，内容为 "noToolsUsed()" + Loading...
-				// 然后在 loadContext 中 加上 <environment_details>
-				// 接着，把这俩消息作为 role: "user" 的 API 消息发送
-				// JSON.stringify() 把这俩作为 request 作为上面 "api_req_started" 的内容，覆盖了之前的内容
-				// --- 上面的 API 消息会得到 “对不起,我之前没有使用工具……”之类的回复，以及 <plan_mode_response> 工具调用
-				// updateApiReqMsg() 会更新上面 "api_req_started" 的指标
-				return false
-			}
-			if (messageBlock.type === "text" && messageBlock.text.includes("<repo_crawler>")) {
-				// /s 修饰符表示 . 匹配任何字符，包括换行符
-				const match = messageBlock.text.match(/<repo_crawler>(.*?)<\/repo_crawler>/s);
-				const req = match ? match[1].trim() : '';
-				console.log("用户原始需求：", req)
-
-				if (req) {
-					// 清除掉 "<repo_crawler>" 避免重复匹配
-					let newContent = messageBlock.text.replaceAll(/(<repo_crawler>|<\/repo_crawler>)/g, "")
-
-					// 处理 repo_crawler 工具调用
-					const { repositories, url, _text, _images } = await this.handleRepoSearchAgent(req)
-
-					if (repositories.length > 0) {
-						// 把仓库的地址信息加到 newContent 中
-						newContent += "\n\n" + url
-						messageBlock.text = newContent					
-						
-						// 接下来需要替换 <task> 标签中的任务文本。
-						// 一般默认 <repo_crawler> 所在的块就是 <task> 所在的块，但是之后还是内层循环查找一下比较好
-						let newTask = `<task>\n${_text}。请使用 git clone 命令下载这个仓库，并使用 code 命令，在当前 VS Code 工作区中打开这个仓库\n</task>`
-						newContent = messageBlock.text.replace(/<task>[\s\S]*<\/task>/, newTask);
-						messageBlock.text = newContent
-						// 弹出重复的 environmentDetails，因为在新的一次递归中会重新加载环境信息
-						userContent.pop()
-						// 用新的 userContent 来递归
-						await this.recursivelyMakeClineRequests(userContent, includeFileDetails, isNewTask)
-					} else {
-						// 没有找到相关仓库
-						await this.say("text", "对不起，没有找到相关仓库")
-					}					
-				}
-				// TODO 请求为空时，提醒用户输入
-				return true
-			}
-		}
 
 		await this.addToApiConversationHistory({
 			role: "user",
@@ -3871,7 +3564,6 @@ export class Cline {
 			// now add to apiconversationhistory
 			// need to save assistant responses to file before proceeding to tool use since user can exit at any moment and we wouldn't be able to save the assistant's response
 			let didEndLoop = false
-			let state = 0
 			// NOTE: assistantMessage 此时是 原始的 LLM response 加上了 3 种说明之一（this.abort、this.didRejectTool、this.didAlreadyUseTool）
 			// - 在之前处理 LLM response 的流式结果时，this.abort 为 true，则利用 abortStream 中加入对话历史
 			// - 否则，在下面 将其加入对话历史
@@ -3963,7 +3655,7 @@ export class Cline {
 						) {
 							return {
 								...block,
-								text: await parseMentions(block.text, cwd, this.urlContentFetcher),
+								text: await parseMentions(block.text, cwd, this.urlContentFetcher, this),
 							}
 						}
 					}
