@@ -318,13 +318,13 @@ interface RepoInfo {
 }
 
 const handleRepoSearchAgent = async (req: string, _cline: Cline) => {
-	let repositories: string | any[] = [];
-	let url: string = "";
-	let _text: string = "";
-	let _images: string[] = [];
+	let repositories: string | any[] = []
+	let url: string = ""
+	let _text: string = ""
+	let _images: string[] = []
 	try {
-		const controller = new AbortController();
-		const signal = controller.signal;
+		const controller = new AbortController()
+		const signal = controller.signal
 
 		const response = await fetch("http://localhost:5000/get_url_stream", {
 			method: "POST",
@@ -333,79 +333,84 @@ const handleRepoSearchAgent = async (req: string, _cline: Cline) => {
 			},
 			body: JSON.stringify({ "query": req || "React应用" }),
 			signal
-		});
+		})
 
 		if (!response.ok) {
-			throw new Error(`HTTP error! status: ${response.status}`);
+			throw new Error(`HTTP error! status: ${response.status}`)
 		}
 
 		// 处理SSE流
-		const reader = response.body?.getReader();
-		const decoder = new TextDecoder();
+		const reader = response.body?.getReader()
+		const decoder = new TextDecoder()
 
 		if (reader) {
 			try {
 				while (true) {
-					const { done, value } = await reader.read();
+					const { done, value } = await reader.read()
 					if (done) {
-						break;
+						break
 					}
 
-					const text = decoder.decode(value, { stream: true });
-					const lines = text.split("\n\n");
+					const text = decoder.decode(value, { stream: true })
+					const lines = text.split("\n\n")
 
 					for (const line of lines) {
 						if (line.startsWith('data: ')) {
 							const { step, data } = JSON.parse(line.slice(6))
-
-							await _cline.say("checkpoint_created")
 							// 根据不同步骤展示不同的信息
 							switch (step) {
 								case 'initial_requirements':
-									await _cline.say("text", `正在分析您的需求: "${data}"...`);
-									break;
+									await _cline.say("checkpoint_created")
+									await _cline.say("text", `正在分析您的需求: "${data}"...`)
+									break
 								case 'refined_requirements':
-									await _cline.say("text", `我理解您的核心需求是: "${data}"`);
-									break;
+									await _cline.say("checkpoint_created")
+									await _cline.say("text", `我理解您的核心需求是: "${data}"`)
+									break
 								case 'search_keywords':
-									await _cline.say("text", `使用以下关键词搜索: ${data.join(", ")}`);
-									break;
+									await _cline.say("checkpoint_created")
+									await _cline.say("text", `使用以下关键词搜索: ${data.join(", ")}`)
+									break
 								case 'initial_repositories':
-									await _cline.say("text", `初步找到 ${data} 个相关仓库，正在筛选...`);
-									break;
+									await _cline.say("checkpoint_created")
+									await _cline.say("text", `初步找到 ${data} 个相关仓库，正在筛选...`)
+									break
 								case 'unique_repositories':
-									await _cline.say("text", `去重后剩余 ${data} 个仓库`);
-									break;
+									await _cline.say("checkpoint_created")
+									await _cline.say("text", `去重后剩余 ${data} 个仓库`)
+									break
 								case 'recalled_repositories':
-									await _cline.say("text", `筛选出最相关的 ${data.length} 个仓库，正在评估仓库1/3...`);
-									break;
+									await _cline.say("checkpoint_created")
+									await _cline.say("text", `筛选出最相关的 ${data.length} 个仓库，正在评估仓库1/3...`)
+									break
 								case 'evaluation_progress':
+									await _cline.say("checkpoint_created")
 									const { index, total, current }: { index: number, total: number, current: RepoInfo} = data;
 									url += current.html_url + "\n\n"
-									await _cline.say("text", `第${index}个仓库的评估结果是\n\n${buildRepoInfoString(current)}`);
+									await _cline.say("text", `第${index}个仓库的评估结果是\n\n${buildRepoInfoString(current)}`)
 									if (data.index !== 3) {
-										await _cline.say("text", `正在评估仓库 (${index + 1}/${total})...`);
+										await _cline.say("text", `正在评估仓库 (${index + 1}/${total})...`)
 									}
-									break;
+									break
 								case 'final_result':
+									await _cline.say("checkpoint_created")
 									repositories = data;
-									await _cline.say("text", `评估完成！`);
-									break;
+									await _cline.say("text", `评估完成！`)
+									break
 							}
 						}
 					}
 				}
 			} catch (error) {
-				console.error("读取流时出错:", error);
-				controller.abort();
+				console.error("读取流时出错:", error)
+				controller.abort()
 				throw error;
 			}
 		}
 
 		if (repositories.length <= 0) {
-			throw new Error("未找到合适的仓库");
+			throw new Error("未找到合适的仓库")
 		}
-		await _cline.say("checkpoint_created");
 
 		// 这里再提问一下用户，让用户选择一个项目进行复用
 		const { text, images } = await _cline.ask("followup", "检索到的项目已经展示结束，请您选择一个项目进行复用。在您选择后，我们会自动下载项目")
