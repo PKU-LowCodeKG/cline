@@ -54,9 +54,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 				return <span>Paste URL to fetch contents</span>
 			case ContextMenuOptionType.NoResults:
 				return <span>No results found</span>
-			// 增加 reuse 标签
-			case ContextMenuOptionType.Reuse:
-				return <span>Reuse</span>
+
 			// 增加 repoCrawler 标签
 			case ContextMenuOptionType.RepoCrawler:
 				return <span>Repo Crawler</span>
@@ -122,9 +120,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 				return "git-commit"
 			case ContextMenuOptionType.NoResults:
 				return "info"
-			// 增加 reuse 图标
-			case ContextMenuOptionType.Reuse:
-				return "file-submodule"
+
 			// 增加 repoCrawler 图标
 			case ContextMenuOptionType.RepoCrawler:
 				return "github"

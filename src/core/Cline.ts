@@ -93,7 +93,7 @@ export class Cline {
 	private chatSettings: ChatSettings
 	/** Cline LLM API 对话历史，用作上下文的一部分提供给 各种 LLM */
 	apiConversationHistory: Anthropic.MessageParam[] = []
-	/** Cline Message 历史，用于 webview 呈现。它记录着用户的原始输入（如 "@" 辅助功能） */
+	/** Cline Message 历史，用于 webview 呈现。它记录着用户的原始输入 和 cline 的 ask/say */
 	clineMessages: ClineMessage[] = []
 	private clineIgnoreController: ClineIgnoreController
 	private askResponse?: ClineAskResponse
@@ -217,13 +217,14 @@ export class Cline {
 	}
 
 	// #region 当前任务的 LLM API 对话历史。
-	// 【主线】【LLM API 对话历史】
+	// 【LLM API 对话历史】
 	// 1. Cline LLM API 对话历史 均以 Anthropic.MessageParam[] 形式记录
 	// 2. 根据 `attemptApiRequest` 函数，Cline 和 LLM 交互时，将 LLM API 对话历史 发送给 ApiHandler 接口的 `createMessage` 方法
 	// 3. ApiHandler 接口由各种 LLM 实现，在 `createMessage` 方法中，将 Anthropic.MessageParam[] 形式转为符合自己的格式
 	//    - 其中 ConvertToO1Messages 和 ConvertToOpenAiMessages 转换方法比较常用
 	//    - 此外，只实现了 Gemini O1 openai 格式同 anthropic.message 相互转换的方法，但是在实际代码中并未调用这几个方法
 	// 4. 对于 LLM response，根据 `attemptApiRequest` 函数，Cline 会将 LLM response 转为 Anthropic.MessageParam[] 形式，存入 LLM API 对话历史（ApiConversationHistory 的维护）
+
 
 	/** 从 api_conversation_history.json 读取当前任务的 LLM API 对话历史数组 */
 	private async getSavedApiConversationHistory(): Promise<Anthropic.MessageParam[]> {
@@ -260,7 +261,6 @@ export class Cline {
 	// #endregion
 
 	// #region Cline Message 消息数组的维护（用于 webview 呈现），会影响到任务历史 HistoryItem
-	// FIXME 如何计算需要 截断删除的 API 对话历史？（以及吐槽一句 API 对话历史的删除范围，其值的更新居然是在 Cline Message 相关的函数中的）
 
 	/** 读取 uiMessages 文件中记录的 Cline Message 数组，只在 `resumeTaskFromHistory()` 中使用  */
 	private async getSavedClineMessages(): Promise<ClineMessage[]> {
@@ -279,6 +279,7 @@ export class Cline {
 		return []
 	}
 
+
 	/** 将一条 ClineMessage 存入消息数组，并设置它对应的 API 对话索引（只在 ask 和 say 中调用） */
 	private async addToClineMessages(message: ClineMessage) {
 		// these values allow us to reconstruct the conversation history at the time this cline message was created
@@ -294,8 +295,9 @@ export class Cline {
 		await this.saveClineMessages()
 	}
 
+
 	/**
-	 * 【主线】【Cline Message】更新当前 Cline 实例 绑定的 任务的 时间戳、API 消耗指标等
+	 * 【Cline Message】更新当前 Cline 实例 绑定的 任务的 时间戳、API 消耗指标等
 	 *
 	 * 因 Cline Message 数组的变动而对任务历史 HistoryItem 进行更新
 	 */
@@ -342,6 +344,8 @@ export class Cline {
 	// #endregion
 
 	// #region Checkpoint 的恢复和保存，用于实现 diff 功能
+
+
 	/**
 	 * 恢复到指定的时间点。
 	 *
@@ -521,7 +525,6 @@ export class Cline {
 		try {
 			if (seeNewChangesSinceLastTaskCompletion) {
 				// Get last task completed
-				// 展上次任务完成时的哈希到当前哈希之间的差异
 				const lastTaskCompletedMessage = findLast(
 					this.clineMessages.slice(0, messageIndex),
 					(m) => m.say === "completion_result",
@@ -785,7 +788,6 @@ export class Cline {
 		// NOTE: 当前 ask 请求的时间戳与 发起请求时的时间戳不一致（即消息数组中最后一条消息的时间戳
 		// 说明 这是发送多个 ask 请求的场景中（例如 command_output 的情况）。此时，当前 ask 请求已经被后续请求覆盖，应该被忽略
 		if (this.lastMessageTs !== askTs) {
-			console.log("时间戳不一致时，this.askResponse：", this.askResponse)
 			throw new Error("Current ask promise was ignored 测试") // could happen if we send multiple asks in a row i.e. with command_output. It's important that when we know an ask could fail, it is handled gracefully
 		}
 		const result = {
@@ -884,6 +886,7 @@ export class Cline {
 		}
 	}
 
+
 	/**
 	 * 调用 Cline Say 方法，向用户展示 “工具调用时参数缺失” 的错误消息。
 	 * @param toolName 发生参数缺失的工具名称
@@ -900,6 +903,7 @@ export class Cline {
 		)
 		return formatResponse.toolError(formatResponse.missingToolParameterError(paramName))
 	}
+
 
 	/**
 	 * 如果当前 Cline 实例的 clineMessages 历史队列的最后一条消息 “不完整”，且其 ask 或 say 属性与提供的 askOrSay 参数相同，则：
@@ -918,6 +922,7 @@ export class Cline {
 
 	// Task lifecycle
 
+
 	// #region Cline 实例中 Task 的生命周期：开始新任务/恢复并继续旧任务、中断当前任务
 	/**
 	 * 【主线】基于任务描述 task 或者 提供的图片 image 开始一个新任务
@@ -934,7 +939,7 @@ export class Cline {
 
 		await this.providerRef.deref()?.postStateToWebview()
 
-		//【主线】这是一个新任务的第一条 ClineMessage，用于原样展示用户输入的任务描述
+		// 这是一个新任务的第一条 ClineMessage，用于原样展示用户输入的任务描述
 		// 同时，在后续过程中还会取 第[0]条作为该任务的描述
 		await this.say("text", task, images)
 
@@ -1251,16 +1256,9 @@ export class Cline {
 	// #endregion
 
 	// Checkpoints
-	/**
-	 * 保存检查点的异步方法。
-	 *
-	 * 此方法会尝试提交一个检查点，并根据不同情况更新聊天消息中的检查点信息。
-	 * @param {boolean} [isAttemptCompletionMessage=false] - 指示是否将当前操作视为尝试完成消息的操作。
-	 *
-	 */
+
 	async saveCheckpoint(isAttemptCompletionMessage: boolean = false) {
 		// Set isCheckpointCheckedOut to false for all checkpoint_created messages
-		//表示这些检查点不再处于检出状态
 		this.clineMessages.forEach((message) => {
 			if (message.say === "checkpoint_created") {
 				message.isCheckpointCheckedOut = false
@@ -1273,7 +1271,6 @@ export class Cline {
 			this.checkpointTracker?.commit().then(async (commitHash) => {
 				const lastCheckpointMessage = findLast(this.clineMessages, (m) => m.say === "checkpoint_created")
 				if (lastCheckpointMessage) {
-					// 赋值： 当前提交的哈希值
 					lastCheckpointMessage.lastCheckpointHash = commitHash
 					await this.saveClineMessages()
 				}
@@ -1410,6 +1407,7 @@ export class Cline {
 		}
 	}
 
+
 	/** 根据 用户自动批准 Cline 使用工具的 权限设置，将工具调用分为 5 种权限，并给出是否允许 */
 	shouldAutoApproveTool(toolName: ToolUseName): boolean {
 		if (this.autoApprovalSettings.enabled) {
@@ -1441,6 +1439,7 @@ export class Cline {
 		// Only prepend the statusCode if it's not already part of the message
 		return statusCode && !message.includes(statusCode.toString()) ? `${statusCode} - ${message}` : message
 	}
+
 
 	/**
 	 * 【主线】该函数是一个异步生成器函数，非常适合处理需要逐步获取的 API 数据流
@@ -1523,7 +1522,6 @@ export class Cline {
 		}
 
 		// If the previous API request's total token usage is close to the context window, truncate the conversation history to free up space for the new request
-		// 如果token使用量接近上下文窗口大小，则截断对话历史以释放空间
 		// 5. 如果之前的 API 请求的 token 使用量接近上下文窗口的最大值，则截断对话历史记录，以便为新请求腾出空间。
 		if (previousApiReqIndex >= 0) {
 			// 5-1. 如果 previousApiReqIndex 大于或等于 0，则获取上一个请求的信息。通过解析 clineMessages 中的历史记录，计算出 tokensIn、tokensOut、cacheWrites 和 cacheReads 的总和。
@@ -1559,7 +1557,6 @@ export class Cline {
 					// Since the user may switch between models with different context windows, truncating half may not be enough (ie if switching from claude 200k to deepseek 64k, half truncation will only remove 100k tokens, but we need to remove much more)
 					// So if totalTokens/2 is greater than maxAllowedSize, we truncate 3/4 instead of 1/2
 					// FIXME: truncating the conversation in a way that is optimal for prompt caching AND takes into account multi-context window complexity is something we need to improve
-					// 计算保留值
 					const keep = totalTokens / 2 > maxAllowedSize ? "quarter" : "half"
 
 					// NOTE: it's okay that we overwriteConversationHistory in resume task since we're only ever removing the last user message and not anything in the middle which would affect this range
@@ -3304,6 +3301,7 @@ export class Cline {
 		// getting verbose details is an expensive operation, it uses globby to top-down build file structure of project which for large projects can take a few seconds
 		// for the best UX we show a placeholder api_req_started message with a loading spinner as this happens
 		// 【主线】将"role"为"user"的消息数组的 content 拼接成一个字符串，作为 api_req_started 这条 ClineMessage 的内容
+		// 这里的 API Request 还没有完成（要经过 loadContext 解析），所以这里是 Loading...，在前端可以看到
 		await this.say(
 			"api_req_started",
 			JSON.stringify({
@@ -3454,7 +3452,7 @@ export class Cline {
 			let reasoningMessage = ""
 			this.isStreaming = true
 			try {
-				// NOTE: ApiStreamChunk 形式（"text"、"reasoning"、"usage" 三种类型）
+				// NOTE: ApiStreamChunk 形式（"text"、"reasoning"、"usage" 三种类型）由各自的 api/provider 实现返回
 				for await (const chunk of stream) {
 					if (!chunk) {
 						continue
@@ -3564,7 +3562,7 @@ export class Cline {
 			// now add to apiconversationhistory
 			// need to save assistant responses to file before proceeding to tool use since user can exit at any moment and we wouldn't be able to save the assistant's response
 			let didEndLoop = false
-			// NOTE: assistantMessage 此时是 原始的 LLM response 加上了 3 种说明之一（this.abort、this.didRejectTool、this.didAlreadyUseTool）
+			// NOTE: assistantMessage 字符串是 原始的 LLM response 加上了 3 种说明之一（this.abort、this.didRejectTool、this.didAlreadyUseTool）
 			// - 在之前处理 LLM response 的流式结果时，this.abort 为 true，则利用 abortStream 中加入对话历史
 			// - 否则，在下面 将其加入对话历史
 
@@ -3625,6 +3623,7 @@ export class Cline {
 		}
 	}
 
+
 	/**
 	 * 【主线】识别 "role"为"user"的 Anthropic 消息的"content"部分中 mentions（@），并解析它们。
 	 * 返回：
@@ -3665,6 +3664,7 @@ export class Cline {
 			this.getEnvironmentDetails(includeFileDetails),
 		])
 	}
+
 
 	/**
 	 * 【主线】收集、生成当前开发环境的详细信息，并返回。这个函数返回的文本用于 LLM API 对话

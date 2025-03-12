@@ -57,6 +57,5 @@ Mention regex:
 // 2. 标点符号或者空白符 前的 url 内容被完整匹配
 // NOTE: 2025/3/5 增加 repoCrawler 的匹配
 export const mentionRegex =
-//	/@((?:\/|\w+:\/\/)[^\s]+?|[a-f0-9]{7,40}\b|problems\b|terminal\b|git-changes\b|reuse:https:\/\/github\.com\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+)(?=[.,;:!?]?(?=[\s\r\n]|$))/
-	/@((?:\/|\w+:\/\/)[^\s]+?|[a-f0-9]{7,40}\b|problems\b|terminal\b|git-changes\b|reuse (?:\/|\w+:\/\/)[^\s]+?|repoCrawler.*)(?=[.,;:!?]?(?=[\s\r\n]|$))/
+	/@((?:\/|\w+:\/\/)[^\s]+?|[a-f0-9]{7,40}\b|problems\b|terminal\b|git-changes\b|repoCrawler.*)(?=[.,;:!?]?(?=[\s\r\n]|$))/
 export const mentionRegexGlobal = new RegExp(mentionRegex.source, "g")

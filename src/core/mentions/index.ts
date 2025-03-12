@@ -10,7 +10,6 @@ import { diagnosticsToProblemsString } from "../../integrations/diagnostics"
 import { getLatestTerminalOutput } from "../../integrations/terminal/get-latest-output"
 import { getCommitInfo } from "../../utils/git"
 import { getWorkingState } from "../../utils/git"
-import axios from "axios"
 import { Cline } from "../Cline"
 
 export function openMention(mention?: string): void {
@@ -40,6 +39,7 @@ export function openMention(mention?: string): void {
 	}
 }
 
+
 /**
  * 【主线】解析 用户输入/生成的 文本中的 mentions（@），并将 mentions（@）的详细信息追加到解析后的文本中。
  *
@@ -53,7 +53,7 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 	// 创建一个Set来存储文本中出现的所有 mentions（@）
 	const mentions: Set<string> = new Set()
 
-	// 使用正则表达式匹配并替换 "@" 内容，进而让 "@" 内容不被重复匹配。这是必要的，因为 userContent 的内容大多数时候在增量更新而非覆盖，之前解析过的 mention 不应该再次解析
+	// 使用正则表达式匹配并替换 "@" 内容，进而让 "@" 内容不被重复匹配。这是必要的，因为 userContent 的内容大多数时候在增量更新而非覆盖，之前解析过的 "@" 内容不应重复解析
 	// NOTE: 这里的 match 是完整的正则匹配结果，mention 是正则中的第一个捕获组（只有 "@" 后面的关键词）
 	// 尽管 replace 方法只替换一次，但由于 mentionRegexGlobal 使用了全局标志 "g"，所以会匹配所有
 	let parsedText = text.replace(mentionRegexGlobal, (match, mention) => {
@@ -90,9 +90,8 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 		else if (/^[a-f0-9]{7,40}$/.test(mention)) {
 			return `Git commit '${mention}' (see below for commit info)`
 		}
-		else if (mention.startsWith("reuse")) {
-			return `复用组尝试集成项目解析中...`
-		}
+
+
 		else if (mention.startsWith("repoCrawler")) {
 			return `搜索和用户描述相关的可复用仓库`
 		}
@@ -102,7 +101,7 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 
 	// 从提及内容的Set中查找第一个以 "http" 开头的URL
 	const urlMention = Array.from(mentions).find((mention) => mention.startsWith("http"))
-	// 用于存储启动浏览器时可能出现的错误
+	/** 用于存储启动浏览器时可能出现的错误 */
 	let launchBrowserError: Error | undefined
 
 	// 如果存在URL提及内容
@@ -111,7 +110,6 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 			// 启动浏览器，以便后续获取URL的内容
 			await urlContentFetcher.launchBrowser()
 		} catch (error) {
-			// 捕获启动浏览器时的错误
 			launchBrowserError = error as Error
 			vscode.window.showErrorMessage(`Error fetching content for ${urlMention}: ${error.message}`)
 		}
@@ -160,7 +158,6 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 		// 如果提及内容是 "problems"（插件前端 @Problems）
 		else if (mention === "problems") {
 			try {
-				// 获取工作区的问题诊断信息
 				const problems = getWorkspaceProblems(cwd)
 				parsedText += `\n\n<workspace_diagnostics>\n${problems}\n</workspace_diagnostics>`
 			} catch (error) {
@@ -170,7 +167,6 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 		// 如果提及内容是 "terminal"
 		else if (mention === "terminal") {
 			try {
-				// 获取最新的终端输出信息
 				const terminalOutput = await getLatestTerminalOutput()
 				parsedText += `\n\n<terminal_output>\n${terminalOutput}\n</terminal_output>`
 			} catch (error) {
@@ -180,7 +176,6 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 		// 如果提及内容是 "git-changes"
 		else if (mention === "git-changes") {
 			try {
-				// 获取工作目录的Git状态信息
 				const workingState = await getWorkingState(cwd)
 				parsedText += `\n\n<git_working_state>\n${workingState}\n</git_working_state>`
 			} catch (error) {
@@ -190,7 +185,6 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 		// 如果提及内容是一个7到40位的十六进制字符串，可能是Git提交哈希值
 		else if (/^[a-f0-9]{7,40}$/.test(mention)) {
 			try {
-				// 获取指定Git提交的详细信息
 				const commitInfo = await getCommitInfo(mention, cwd)
 				parsedText += `\n\n<git_commit hash="${mention}">\n${commitInfo}\n</git_commit>`
 			} catch (error) {
@@ -198,25 +192,7 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 			}
 		}
 
-		// 如果提及内容是 "reuse"
-		else if (mention.startsWith("reuse")) {
-			// 使用正则表达式从mention中提取GitHub仓库URL
-			const urlMatch = mention.match(/https:\/\/github\.com\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+/)
-			if (!urlMatch) {
-				console.error("No valid GitHub repository URL found in reuse mention")
-				return `Invalid reuse mention: No GitHub repository URL found`
-			}
 
-			const url = urlMatch[0]
-			console.log(`Reuse Test: ${url}`)
-
-			try {
-				const summary = await getSummaryFromRepoUrl(url)
-				parsedText += `\n\n<repo_summary>\n${summary}\n</repo_summary>`
-			} catch (error) {
-				parsedText += `\n\n<repo_summary>\nError fetching summary: ${error.message}\n</repo_summary>`
-			}
-		}
 		// 如果提及内容是 "repoCrawler"
 		else if (mention.startsWith("repoCrawler")) {
 			// 使用正则表达式从mention中提取 用户希望爬虫检索的需求
@@ -250,12 +226,10 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 			// 关闭浏览器，释放资源
 			await urlContentFetcher.closeBrowser()
 		} catch (error) {
-			// 捕获关闭浏览器时的错误，并在控制台输出错误信息
 			console.error(`Error closing browser: ${error.message}`)
 		}
 	}
 
-	// 返回解析后的文本，包含原始文本和提及内容的详细信息
 	return parsedText
 }
 
@@ -328,41 +302,8 @@ function getWorkspaceProblems(cwd: string): string {
 	return result
 }
 
-async function getSummaryFromRepoUrl(url: string): Promise<string> {
-	try {
-		const summary = await axios.post("https://example.com/", { url })
-		return summary.data
-	} catch (error) {
-		console.error(`Error fetching summary for repo at ${url}: ${error.message}`)
-		return `复用组：Summary for repo at ${url}
-博客系统
-├── 用户管理
-│   ├── 修改账户信息 [1]
-├── 博客管理
-│   ├── 博客列表查询 [2]
-│   ├── 获取博客详情 [6]
-│   ├── 删除博客 [3]
-│   ├── 更新博客可见性 [5]
-├── 分类与标签管理
-│   ├── 获取分类和标签 [4]
-├── 评论管理
-│   ├── 分页查询评论 [7]
-│   ├── 更新评论公开状态 [8]
-│   ├── 删除评论 [9]
-│   ├── 修改评论 [10]
-├── 友链管理
-│   ├── 获取友链列表 [11]
-│   ├── 更新友链公开状态 [12]
-│   ├── 添加友链 [13]
-├── 动态管理
-│   ├── 获取动态列表 [14]
-│   ├── 更新动态公开状态 [15]
-├── 访客管理
-│   ├── 获取访客列表 [16]
-│   ├── 删除访客 [17]`
-	}
-}
 
+// #region 仓库搜索相关
 interface RepoInfo {
 	clone_url: string
 	full_name: string
@@ -496,3 +437,6 @@ ${repo.readme.slice(12, -3)}
 `
 	return repoInfoString
 }
+// #endregion
+
+

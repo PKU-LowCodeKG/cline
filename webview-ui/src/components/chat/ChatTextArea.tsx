@@ -336,8 +336,6 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						insertValue = "terminal"
 					} else if (type === ContextMenuOptionType.Git) {
 						insertValue = value || ""
-					} else if (type === ContextMenuOptionType.Reuse) { // 增加 reuse 插入
-						insertValue = "reuse"
 					} else if (type === ContextMenuOptionType.RepoCrawler) { // 增加 repoCrawler 插入
 						insertValue = "repoCrawler"
 					}
