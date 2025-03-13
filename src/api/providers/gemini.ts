@@ -5,6 +5,8 @@ import { ApiHandler } from "../"
 import { ApiHandlerOptions, geminiDefaultModelId, GeminiModelId, geminiModels, ModelInfo } from "../../shared/api"
 import { convertAnthropicMessageToGemini } from "../transform/gemini-format"
 import { ApiStream } from "../transform/stream"
+import { Message } from "ollama"
+import { logMessages, logStreamOutput } from "../../core/prompts/show_prompt"
 
 export class GeminiHandler implements ApiHandler {
 	private options: ApiHandlerOptions
@@ -20,6 +22,21 @@ export class GeminiHandler implements ApiHandler {
 
 	@withRetry()
 	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
+		// Convert messages to Ollama format for logging
+		const ollamaMessages: Message[] = [
+			{ role: "system", content: systemPrompt },
+			...messages.map(msg => ({
+				role: msg.role,
+				content: typeof msg.content === "string"
+					? msg.content
+					: msg.content.map(c => ('text' in c ? c.text : '')).filter(Boolean).join("\n")
+			}))
+		]
+		logMessages(ollamaMessages)
+
+		// Create array to collect chunks for logging
+		const chunks: Array<{ type: "text", text: string }> = []
+
 		const model = this.client.getGenerativeModel({
 			model: this.getModel().id,
 			systemInstruction: systemPrompt,
@@ -33,18 +50,36 @@ export class GeminiHandler implements ApiHandler {
 		})
 
 		for await (const chunk of result.stream) {
-			yield {
-				type: "text",
-				text: chunk.text(),
+			const textChunk = {
+				type: "text" as const,
+				text: chunk.text()
 			}
+			chunks.push(textChunk)
+			yield textChunk
 		}
 
 		const response = await result.response
-		yield {
-			type: "usage",
+		const usageChunk = {
+			type: "usage" as const,
 			inputTokens: response.usageMetadata?.promptTokenCount ?? 0,
 			outputTokens: response.usageMetadata?.candidatesTokenCount ?? 0,
 		}
+		yield usageChunk
+
+		// Log complete output including usage information
+		await logStreamOutput({
+			async *[Symbol.asyncIterator]() {
+				// First yield all text chunks
+				for (const chunk of chunks) {
+					yield chunk
+				}
+				// Then yield usage information as a text chunk
+				yield {
+					type: "text",
+					text: `\nUsage Metrics:\nInput Tokens: ${usageChunk.inputTokens}\nOutput Tokens: ${usageChunk.outputTokens}`
+				}
+			}
+		} as ApiStream)
 	}
 
 	getModel(): { id: GeminiModelId; info: ModelInfo } {

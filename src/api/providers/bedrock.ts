@@ -5,6 +5,8 @@ import { ApiHandler } from "../"
 import { ApiHandlerOptions, bedrockDefaultModelId, BedrockModelId, bedrockModels, ModelInfo } from "../../shared/api"
 import { ApiStream } from "../transform/stream"
 import { fromNodeProviderChain } from "@aws-sdk/credential-providers"
+import { Message } from "ollama"
+import { logMessages, logStreamOutput } from "../../core/prompts/show_prompt"
 
 // https://docs.anthropic.com/en/api/claude-on-amazon-bedrock
 export class AwsBedrockHandler implements ApiHandler {
@@ -16,6 +18,21 @@ export class AwsBedrockHandler implements ApiHandler {
 
 	@withRetry()
 	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
+		// Convert messages to Ollama format for logging
+		const ollamaMessages: Message[] = [
+			{ role: "system", content: systemPrompt },
+			...messages.map(msg => ({
+				role: msg.role,
+				content: typeof msg.content === "string"
+					? msg.content
+					: msg.content.map(c => ('text' in c ? c.text : '')).filter(Boolean).join("\n")
+			}))
+		]
+		logMessages(ollamaMessages)
+
+		// Create array to collect chunks for logging
+		const chunks: Array<{ type: "text", text: string }> = []
+
 		// cross region inference requires prefixing the model id with the region
 		let modelId = await this.getModelId()
 
@@ -53,24 +70,24 @@ export class AwsBedrockHandler implements ApiHandler {
 						content:
 							typeof message.content === "string"
 								? [
-										{
-											type: "text",
-											text: message.content,
+									{
+										type: "text",
+										text: message.content,
+										...(this.options.awsBedrockUsePromptCache === true && {
+											cache_control: { type: "ephemeral" },
+										}),
+									},
+								]
+								: message.content.map((content, contentIndex) =>
+									contentIndex === message.content.length - 1
+										? {
+											...content,
 											...(this.options.awsBedrockUsePromptCache === true && {
 												cache_control: { type: "ephemeral" },
 											}),
-										},
-									]
-								: message.content.map((content, contentIndex) =>
-										contentIndex === message.content.length - 1
-											? {
-													...content,
-													...(this.options.awsBedrockUsePromptCache === true && {
-														cache_control: { type: "ephemeral" },
-													}),
-												}
-											: content,
-									),
+										}
+										: content,
+								),
 					}
 				}
 				return message
@@ -116,15 +133,26 @@ export class AwsBedrockHandler implements ApiHandler {
 				case "content_block_delta":
 					switch (chunk.delta.type) {
 						case "text_delta":
-							yield {
-								type: "text",
+							const textChunk = {
+								type: "text" as const,
 								text: chunk.delta.text,
 							}
+							chunks.push(textChunk)
+							yield textChunk
 							break
 					}
 					break
 			}
 		}
+
+		// Log complete output
+		await logStreamOutput({
+			async *[Symbol.asyncIterator]() {
+				for (const chunk of chunks) {
+					yield chunk
+				}
+			}
+		} as ApiStream)
 	}
 
 	getModel(): { id: BedrockModelId; info: ModelInfo } {

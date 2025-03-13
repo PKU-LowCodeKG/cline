@@ -14,6 +14,8 @@ import {
 import { convertToOpenAiMessages } from "../transform/openai-format"
 import { ApiStream } from "../transform/stream"
 import { convertToR1Format } from "../transform/r1-format"
+import { Message } from "ollama"
+import { logMessages, logStreamOutput } from "../../core/prompts/show_prompt"
 
 export class QwenHandler implements ApiHandler {
 	private options: ApiHandlerOptions
@@ -50,6 +52,28 @@ export class QwenHandler implements ApiHandler {
 
 	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
 		const model = this.getModel()
+
+		// Convert messages to Ollama format for logging
+		const ollamaMessages: Message[] = [
+			{ role: "system", content: systemPrompt },
+			...messages.map(msg => ({
+				role: msg.role,
+				content: typeof msg.content === "string"
+					? msg.content
+					: msg.content.map(c => ('text' in c ? c.text : '')).filter(Boolean).join("\n")
+			}))
+		]
+		logMessages(ollamaMessages)
+
+		// Create array to collect chunks for logging
+		const chunks: Array<{ type: "text" | "reasoning", text?: string, reasoning?: string }> = []
+		let usage = {
+			inputTokens: 0,
+			outputTokens: 0,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0
+		}
+
 		const isDeepseekReasoner = model.id.includes("deepseek-r1")
 		let openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
 			{ role: "system", content: systemPrompt },
@@ -70,30 +94,52 @@ export class QwenHandler implements ApiHandler {
 		for await (const chunk of stream) {
 			const delta = chunk.choices[0]?.delta
 			if (delta?.content) {
-				yield {
-					type: "text",
-					text: delta.content,
+				const textChunk = {
+					type: "text" as const,
+					text: delta.content
 				}
+				chunks.push(textChunk)
+				yield textChunk
 			}
 
 			if (delta && "reasoning_content" in delta && delta.reasoning_content) {
-				yield {
-					type: "reasoning",
-					reasoning: (delta.reasoning_content as string | undefined) || "",
+				const reasoningChunk = {
+					type: "reasoning" as const,
+					reasoning: (delta.reasoning_content as string | undefined) || ""
 				}
+				chunks.push(reasoningChunk)
+				yield reasoningChunk
 			}
 
 			if (chunk.usage) {
-				yield {
-					type: "usage",
+				usage = {
 					inputTokens: chunk.usage.prompt_tokens || 0,
 					outputTokens: chunk.usage.completion_tokens || 0,
 					// @ts-ignore-next-line
 					cacheReadTokens: chunk.usage.prompt_cache_hit_tokens || 0,
 					// @ts-ignore-next-line
-					cacheWriteTokens: chunk.usage.prompt_cache_miss_tokens || 0,
+					cacheWriteTokens: chunk.usage.prompt_cache_miss_tokens || 0
+				}
+				yield {
+					type: "usage",
+					...usage
 				}
 			}
 		}
+
+		// Log complete output
+		await logStreamOutput({
+			async *[Symbol.asyncIterator]() {
+				// First yield all text/reasoning chunks
+				for (const chunk of chunks) {
+					yield chunk
+				}
+				// Then yield usage information as a text chunk
+				yield {
+					type: "text",
+					text: `\nUsage Metrics:\nInput Tokens: ${usage.inputTokens}\nOutput Tokens: ${usage.outputTokens}\nCache Read Tokens: ${usage.cacheReadTokens}\nCache Write Tokens: ${usage.cacheWriteTokens}`
+				}
+			}
+		} as ApiStream)
 	}
 }

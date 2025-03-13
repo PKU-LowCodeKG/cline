@@ -4,6 +4,8 @@ import { ApiHandlerOptions, liteLlmDefaultModelId, liteLlmModelInfoSaneDefaults 
 import { ApiHandler } from ".."
 import { ApiStream } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
+import { Message } from "ollama"
+import { logMessages, logStreamOutput } from "../../core/prompts/show_prompt"
 
 export class LiteLlmHandler implements ApiHandler {
 	private options: ApiHandlerOptions
@@ -18,6 +20,21 @@ export class LiteLlmHandler implements ApiHandler {
 	}
 
 	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
+		// Convert messages to Ollama format for logging
+		const ollamaMessages: Message[] = [
+			{ role: "system", content: systemPrompt },
+			...messages.map(msg => ({
+				role: msg.role,
+				content: typeof msg.content === "string"
+					? msg.content
+					: msg.content.map(c => ('text' in c ? c.text : '')).filter(Boolean).join("\n")
+			}))
+		]
+		logMessages(ollamaMessages)
+
+		// Create array to collect chunks for logging
+		const chunks: Array<{ type: "text", text: string }> = []
+
 		const formattedMessages = convertToOpenAiMessages(messages)
 		const systemMessage: OpenAI.Chat.ChatCompletionSystemMessageParam = {
 			role: "system",
@@ -32,23 +49,48 @@ export class LiteLlmHandler implements ApiHandler {
 			stream_options: { include_usage: true },
 		})
 
+		let usage = {
+			inputTokens: 0,
+			outputTokens: 0
+		}
+
 		for await (const chunk of stream) {
 			const delta = chunk.choices[0]?.delta
 			if (delta?.content) {
-				yield {
-					type: "text",
-					text: delta.content,
+				const textChunk = {
+					type: "text" as const,
+					text: delta.content
 				}
+				chunks.push(textChunk)
+				yield textChunk
 			}
 
 			if (chunk.usage) {
+				usage = {
+					inputTokens: chunk.usage.prompt_tokens || 0,
+					outputTokens: chunk.usage.completion_tokens || 0
+				}
 				yield {
 					type: "usage",
-					inputTokens: chunk.usage.prompt_tokens || 0,
-					outputTokens: chunk.usage.completion_tokens || 0,
+					...usage
 				}
 			}
 		}
+
+		// Log complete output including usage information
+		await logStreamOutput({
+			async *[Symbol.asyncIterator]() {
+				// First yield all text chunks
+				for (const chunk of chunks) {
+					yield chunk
+				}
+				// Then yield usage information as a text chunk
+				yield {
+					type: "text",
+					text: `\nUsage Metrics:\nInput Tokens: ${usage.inputTokens}\nOutput Tokens: ${usage.outputTokens}`
+				}
+			}
+		} as ApiStream)
 	}
 
 	getModel() {

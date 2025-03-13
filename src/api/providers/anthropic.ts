@@ -4,6 +4,8 @@ import { withRetry } from "../retry"
 import { anthropicDefaultModelId, AnthropicModelId, anthropicModels, ApiHandlerOptions, ModelInfo } from "../../shared/api"
 import { ApiHandler } from "../index"
 import { ApiStream } from "../transform/stream"
+import { Message } from "ollama"
+import { logMessages, logStreamOutput } from "../../core/prompts/show_prompt"
 
 export class AnthropicHandler implements ApiHandler {
 	private options: ApiHandlerOptions
@@ -21,6 +23,21 @@ export class AnthropicHandler implements ApiHandler {
 	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
 		const model = this.getModel()
 		let stream: AnthropicStream<Anthropic.RawMessageStreamEvent>
+
+		// Convert messages to Ollama format for logging
+		const ollamaMessages: Message[] = [
+			{ role: "system", content: systemPrompt },
+			...messages.map(msg => ({
+				role: msg.role,
+				content: typeof msg.content === "string"
+					? msg.content
+					: msg.content.map(c => ('text' in c ? c.text : '')).filter(Boolean).join("\n")
+			}))
+		]
+		logMessages(ollamaMessages)
+
+		// Create array to collect chunks for logging
+		const chunks: Array<{ type: "text" | "reasoning", text?: string, reasoning?: string }> = []
 		const modelId = model.id
 
 		let budget_tokens = this.options.thinkingBudgetTokens || 0
@@ -64,24 +81,24 @@ export class AnthropicHandler implements ApiHandler {
 									content:
 										typeof message.content === "string"
 											? [
-													{
-														type: "text",
-														text: message.content,
+												{
+													type: "text",
+													text: message.content,
+													cache_control: {
+														type: "ephemeral",
+													},
+												},
+											]
+											: message.content.map((content, contentIndex) =>
+												contentIndex === message.content.length - 1
+													? {
+														...content,
 														cache_control: {
 															type: "ephemeral",
 														},
-													},
-												]
-											: message.content.map((content, contentIndex) =>
-													contentIndex === message.content.length - 1
-														? {
-																...content,
-																cache_control: {
-																	type: "ephemeral",
-																},
-															}
-														: content,
-												),
+													}
+													: content,
+											),
 								}
 							}
 							return message
@@ -129,6 +146,7 @@ export class AnthropicHandler implements ApiHandler {
 		}
 
 		for await (const chunk of stream) {
+			const currentChunk = { type: "", text: "", reasoning: "" }
 			switch (chunk.type) {
 				case "message_start":
 					// tells us cache reads/writes/input/output
@@ -207,7 +225,33 @@ export class AnthropicHandler implements ApiHandler {
 				case "content_block_stop":
 					break
 			}
+
+			// Save chunk content for logging
+			if (chunk.type === "content_block_start") {
+				if (chunk.content_block.type === "text") {
+					chunks.push({ type: "text", text: chunk.content_block.text })
+				} else if (chunk.content_block.type === "thinking") {
+					chunks.push({ type: "reasoning", reasoning: chunk.content_block.thinking || "" })
+				}
+			} else if (chunk.type === "content_block_delta") {
+				if (chunk.delta.type === "text_delta") {
+					chunks.push({ type: "text", text: chunk.delta.text })
+				} else if (chunk.delta.type === "thinking_delta") {
+					chunks.push({ type: "reasoning", reasoning: chunk.delta.thinking })
+				}
+			}
+
+			yield chunk as any // Type assertion to avoid stream event type mismatch
 		}
+
+		// Log complete output
+		await logStreamOutput({
+			async *[Symbol.asyncIterator]() {
+				for (const chunk of chunks) {
+					yield chunk as any
+				}
+			}
+		} as ApiStream)
 	}
 
 	getModel(): { id: AnthropicModelId; info: ModelInfo } {

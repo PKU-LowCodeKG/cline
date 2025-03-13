@@ -7,6 +7,8 @@ import { calculateApiCostOpenAI } from "../../utils/cost"
 import { convertToOpenAiMessages } from "../transform/openai-format"
 import { ApiStream } from "../transform/stream"
 import { convertToR1Format } from "../transform/r1-format"
+import { Message } from "ollama"
+import { logMessages, logStreamOutput } from "../../core/prompts/show_prompt"
 
 export class DeepSeekHandler implements ApiHandler {
 	private options: ApiHandlerOptions
@@ -55,6 +57,21 @@ export class DeepSeekHandler implements ApiHandler {
 	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
 		const model = this.getModel()
 
+		// Convert messages to Ollama format for logging
+		const ollamaMessages: Message[] = [
+			{ role: "system", content: systemPrompt },
+			...messages.map(msg => ({
+				role: msg.role,
+				content: typeof msg.content === "string"
+					? msg.content
+					: msg.content.map(c => ('text' in c ? c.text : '')).filter(Boolean).join("\n")
+			}))
+		]
+		logMessages(ollamaMessages)
+
+		// Create array to collect chunks for logging
+		const chunks: Array<{ type: "text" | "reasoning", text?: string, reasoning?: string }> = []
+
 		const isDeepseekReasoner = model.id.includes("deepseek-reasoner")
 
 		let openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
@@ -79,23 +96,37 @@ export class DeepSeekHandler implements ApiHandler {
 		for await (const chunk of stream) {
 			const delta = chunk.choices[0]?.delta
 			if (delta?.content) {
-				yield {
-					type: "text",
-					text: delta.content,
+				const textChunk = {
+					type: "text" as const,
+					text: delta.content
 				}
+				chunks.push(textChunk)
+				yield textChunk
 			}
 
 			if (delta && "reasoning_content" in delta && delta.reasoning_content) {
-				yield {
-					type: "reasoning",
-					reasoning: (delta.reasoning_content as string | undefined) || "",
+				const reasoningChunk = {
+					type: "reasoning" as const,
+					reasoning: (delta.reasoning_content as string | undefined) || ""
 				}
+				chunks.push(reasoningChunk)
+				yield reasoningChunk
 			}
 
 			if (chunk.usage) {
 				yield* this.yieldUsage(model.info, chunk.usage)
 			}
 		}
+
+		// Log complete output
+		await logStreamOutput({
+			async *[Symbol.asyncIterator]() {
+				for (const chunk of chunks) {
+					yield chunk
+				}
+				// Note: Usage information is already yielded through yieldUsage
+			}
+		} as ApiStream)
 	}
 
 	getModel(): { id: DeepSeekModelId; info: ModelInfo } {

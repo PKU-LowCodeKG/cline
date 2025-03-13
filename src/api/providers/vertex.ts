@@ -5,6 +5,8 @@ import { ApiHandler } from "../"
 import { ApiHandlerOptions, ModelInfo, vertexDefaultModelId, VertexModelId, vertexModels } from "../../shared/api"
 import { ApiStream } from "../transform/stream"
 import { VertexAI } from "@google-cloud/vertexai"
+import { Message } from "ollama"
+import { logMessages, logStreamOutput } from "../../core/prompts/show_prompt"
 
 // https://docs.anthropic.com/en/api/claude-on-vertex-ai
 export class VertexHandler implements ApiHandler {
@@ -27,6 +29,27 @@ export class VertexHandler implements ApiHandler {
 
 	@withRetry()
 	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
+		// Convert messages to Ollama format for logging
+		const ollamaMessages: Message[] = [
+			{ role: "system", content: systemPrompt },
+			...messages.map(msg => ({
+				role: msg.role,
+				content: typeof msg.content === "string"
+					? msg.content
+					: msg.content.map(c => ('text' in c ? c.text : '')).filter(Boolean).join("\n")
+			}))
+		]
+		logMessages(ollamaMessages)
+
+		// Create array to collect chunks for logging
+		const chunks: Array<{ type: "text", text: string }> = []
+		let usage = {
+			inputTokens: 0,
+			outputTokens: 0,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0
+		}
+
 		const model = this.getModel()
 		const modelId = model.id
 
@@ -70,24 +93,24 @@ export class VertexHandler implements ApiHandler {
 										content:
 											typeof message.content === "string"
 												? [
-														{
-															type: "text",
-															text: message.content,
+													{
+														type: "text",
+														text: message.content,
+														cache_control: {
+															type: "ephemeral",
+														},
+													},
+												]
+												: message.content.map((content, contentIndex) =>
+													contentIndex === message.content.length - 1
+														? {
+															...content,
 															cache_control: {
 																type: "ephemeral",
 															},
-														},
-													]
-												: message.content.map((content, contentIndex) =>
-														contentIndex === message.content.length - 1
-															? {
-																	...content,
-																	cache_control: {
-																		type: "ephemeral",
-																	},
-																}
-															: content,
-													),
+														}
+														: content,
+												),
 									}
 								}
 								return {
@@ -95,11 +118,11 @@ export class VertexHandler implements ApiHandler {
 									content:
 										typeof message.content === "string"
 											? [
-													{
-														type: "text",
-														text: message.content,
-													},
-												]
+												{
+													type: "text",
+													text: message.content,
+												},
+											]
 											: message.content,
 								}
 							}),
@@ -127,11 +150,11 @@ export class VertexHandler implements ApiHandler {
 							content:
 								typeof message.content === "string"
 									? [
-											{
-												type: "text",
-												text: message.content,
-											},
-										]
+										{
+											type: "text",
+											text: message.content,
+										},
+									]
 									: message.content,
 						})),
 						stream: true,
@@ -142,13 +165,19 @@ export class VertexHandler implements ApiHandler {
 			for await (const chunk of stream) {
 				switch (chunk.type) {
 					case "message_start":
-						const usage = chunk.message.usage
+						const chunkUsage = chunk.message.usage
+						usage = {
+							inputTokens: chunkUsage.input_tokens || 0,
+							outputTokens: chunkUsage.output_tokens || 0,
+							cacheWriteTokens: chunkUsage.cache_creation_input_tokens || 0,
+							cacheReadTokens: chunkUsage.cache_read_input_tokens || 0
+						}
 						yield {
 							type: "usage",
-							inputTokens: usage.input_tokens || 0,
-							outputTokens: usage.output_tokens || 0,
-							cacheWriteTokens: usage.cache_creation_input_tokens || undefined,
-							cacheReadTokens: usage.cache_read_input_tokens || undefined,
+							inputTokens: usage.inputTokens,
+							outputTokens: usage.outputTokens,
+							cacheWriteTokens: usage.cacheWriteTokens || undefined,
+							cacheReadTokens: usage.cacheReadTokens || undefined
 						}
 						break
 					case "message_delta":
@@ -164,25 +193,31 @@ export class VertexHandler implements ApiHandler {
 						switch (chunk.content_block.type) {
 							case "text":
 								if (chunk.index > 0) {
-									yield {
-										type: "text",
-										text: "\n",
+									const newlineChunk = {
+										type: "text" as const,
+										text: "\n"
 									}
+									chunks.push(newlineChunk)
+									yield newlineChunk
 								}
-								yield {
-									type: "text",
-									text: chunk.content_block.text,
+								const textChunk = {
+									type: "text" as const,
+									text: chunk.content_block.text
 								}
+								chunks.push(textChunk)
+								yield textChunk
 								break
 						}
 						break
 					case "content_block_delta":
 						switch (chunk.delta.type) {
 							case "text_delta":
-								yield {
-									type: "text",
-									text: chunk.delta.text,
+								const deltaChunk = {
+									type: "text" as const,
+									text: chunk.delta.text
 								}
+								chunks.push(deltaChunk)
+								yield deltaChunk
 								break
 						}
 						break
@@ -190,6 +225,24 @@ export class VertexHandler implements ApiHandler {
 						break
 				}
 			}
+
+			// Log complete output for Claude
+			await logStreamOutput({
+				async *[Symbol.asyncIterator]() {
+					// First yield all text chunks
+					for (const chunk of chunks) {
+						yield chunk
+					}
+					// Then yield usage information if available
+					if (usage.inputTokens > 0) {
+						yield {
+							type: "text",
+							text: `\nUsage Metrics:\nInput Tokens: ${usage.inputTokens}\nOutput Tokens: ${usage.outputTokens}\nCache Read Tokens: ${usage.cacheReadTokens}\nCache Write Tokens: ${usage.cacheWriteTokens}`
+						}
+					}
+				}
+			} as ApiStream)
+
 		} else {
 			// gemini
 			const generativeModel = this.clientVertex.getGenerativeModel({
@@ -230,21 +283,29 @@ export class VertexHandler implements ApiHandler {
 			}
 			const streamingResult = await generativeModel.generateContentStream(request)
 			for await (const chunk of streamingResult.stream) {
-				// If usage data is available, yield it similarly:
-				// yield { type: "usage", inputTokens: 0, outputTokens: 0 }
-				// Otherwise, just yield text:
 				const candidates = chunk.candidates || []
 				for (const candidate of candidates) {
 					for (const part of candidate.content?.parts || []) {
 						if (part.text) {
-							yield {
-								type: "text",
-								text: part.text,
+							const textChunk = {
+								type: "text" as const,
+								text: part.text
 							}
+							chunks.push(textChunk)
+							yield textChunk
 						}
 					}
 				}
 			}
+
+			// Log complete output for Gemini too
+			await logStreamOutput({
+				async *[Symbol.asyncIterator]() {
+					for (const chunk of chunks) {
+						yield chunk
+					}
+				}
+			} as ApiStream)
 		}
 	}
 
