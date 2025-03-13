@@ -6,6 +6,7 @@ import { ApiStream } from "../transform/stream"
 import { convertToVsCodeLmMessages } from "../transform/vscode-lm-format"
 import { SELECTOR_SEPARATOR, stringifyVsCodeLmModelSelector } from "../../shared/vsCodeSelectorUtils"
 import { ApiHandlerOptions, ModelInfo, openAiModelInfoSaneDefaults } from "../../shared/api"
+import { logMessages, logStreamOutput } from "../../core/prompts/show_prompt"
 
 // Cline does not update VSCode type definitions or engine requirements to maintain compatibility.
 // This declaration (as seen in src/integrations/TerminalManager.ts) provides types for the Language Model API in newer versions of VSCode.
@@ -422,11 +423,15 @@ export class VsCodeLmHandler implements ApiHandler, SingleCompletionHandler {
 			content: this.cleanMessageContent(msg.content),
 		}))
 
+		// Log input messages
+		logMessages(cleanedMessages)
+
 		// Convert Anthropic messages to VS Code LM messages
 		const vsCodeLmMessages: vscode.LanguageModelChatMessage[] = [
 			vscode.LanguageModelChatMessage.Assistant(cleanedSystemPrompt),
 			...convertToVsCodeLmMessages(cleanedMessages),
 		]
+		
 
 		// Initialize cancellation token for the request
 		this.currentRequestCancellation = new vscode.CancellationTokenSource()
@@ -516,6 +521,15 @@ export class VsCodeLmHandler implements ApiHandler, SingleCompletionHandler {
 					console.warn("Cline <Language Model API>: Unknown chunk type received:", chunk)
 				}
 			}
+
+			// Log complete output
+			await logStreamOutput({
+				async *[Symbol.asyncIterator]() {
+					for await (const chunk of response.stream) {
+						yield chunk
+					}
+				}
+			} as ApiStream)
 
 			// Count tokens in the accumulated text after stream completion
 			const totalOutputTokens: number = await this.countTokens(accumulatedText)
