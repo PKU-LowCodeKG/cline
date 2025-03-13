@@ -1044,7 +1044,8 @@ export class Cline {
 
 		await this.say("text", task, images)
 
-		task = await this.SearchAgent(task)
+		// 任务开始就调用SearchAgent
+		// task = await this.SearchAgent(task)
 
 		this.isInitialized = true
 
