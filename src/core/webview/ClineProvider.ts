@@ -70,10 +70,6 @@ type SecretKey =
 
 
 
-/**
- * 定义了全局状态的键名集合，用于标识系统配置中的各项设置。
- * 这些键名涵盖了API提供商、模型ID、区域设置等配置项。
- */
 type GlobalStateKey =
 	| "apiProvider"
 	| "apiModelId"
