@@ -169,8 +169,6 @@ export interface ClineSayTool {
 		| "listFilesRecursive"
 		| "listCodeDefinitionNames"
 		| "searchFiles"
-		| "acceptGithubRepo"
-		| "buildSystem"
 	path?: string
 	diff?: string
 	content?: string
