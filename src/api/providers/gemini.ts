@@ -5,6 +5,8 @@ import { ApiHandler } from "../"
 import { ApiHandlerOptions, geminiDefaultModelId, GeminiModelId, geminiModels, ModelInfo } from "../../shared/api"
 import { convertAnthropicMessageToGemini } from "../transform/gemini-format"
 import { ApiStream } from "../transform/stream"
+
+
 import { Message } from "ollama"
 import { logMessages, logStreamOutput } from "../../core/prompts/show_prompt"
 

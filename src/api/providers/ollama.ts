@@ -4,6 +4,8 @@ import { ApiHandler } from "../"
 import { ApiHandlerOptions, ModelInfo, openAiModelInfoSaneDefaults } from "../../shared/api"
 import { convertToOllamaMessages } from "../transform/ollama-format"
 import { ApiStream } from "../transform/stream"
+
+
 import { logMessages, logStreamOutput } from "../../core/prompts/show_prompt"
 
 export class OllamaHandler implements ApiHandler {

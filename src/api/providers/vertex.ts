@@ -5,6 +5,8 @@ import { ApiHandler } from "../"
 import { ApiHandlerOptions, ModelInfo, vertexDefaultModelId, VertexModelId, vertexModels } from "../../shared/api"
 import { ApiStream } from "../transform/stream"
 import { VertexAI } from "@google-cloud/vertexai"
+
+
 import { Message } from "ollama"
 import { logMessages, logStreamOutput } from "../../core/prompts/show_prompt"
 

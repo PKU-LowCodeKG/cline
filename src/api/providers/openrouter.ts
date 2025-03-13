@@ -9,6 +9,8 @@ import { streamOpenRouterFormatRequest } from "../transform/openrouter-stream"
 import { ApiStream } from "../transform/stream"
 import { convertToR1Format } from "../transform/r1-format"
 import { OpenRouterErrorResponse } from "./types"
+
+
 import { Message } from "ollama"
 import { logMessages, logStreamOutput } from "../../core/prompts/show_prompt"
 
