@@ -38,6 +38,14 @@ import { getShadowGitPath, getWorkingDirectory, hashWorkingDir } from "./Checkpo
  * - All commits for a workspace are stored in one shadow git, under a single branch
  */
 
+/**
+ * Cline 实例的 Checkpoint 管理器，基于 simpleGit 实现。
+ *
+ * 它是 Cline 实例的工具类，作为 Cline 实例的一个属性，用于管理 Checkpoint 的创建、提交、重置等操作。
+ *
+ * 路径为 [context.globalStorageUri.fsPath]/tasks/[taskId]/checkpoints/.git
+ * @docs simpleGit https://www.npmjs.com/package/simple-git
+ */
 class CheckpointTracker {
 	private globalStoragePath: string
 	private taskId: string
@@ -56,6 +64,7 @@ class CheckpointTracker {
 	 */
 	private constructor(globalStoragePath: string, taskId: string, cwd: string, cwdHash: string) {
 		this.globalStoragePath = globalStoragePath
+		/** 引用的 ClineProvider 实例 */
 		this.taskId = taskId
 		this.cwd = cwd
 		this.cwdHash = cwdHash
@@ -90,6 +99,7 @@ class CheckpointTracker {
 			console.info(`Creating new CheckpointTracker for task ${taskId}`)
 
 			// Check if checkpoints are disabled in VS Code settings
+			/** 这个在 Cline 插件 “设置-高级设置” 打开 VSCode 的设置面板 */
 			const enableCheckpoints = vscode.workspace.getConfiguration("cline").get<boolean>("enableCheckpoints") ?? true
 			if (!enableCheckpoints) {
 				return undefined // Don't create tracker when disabled

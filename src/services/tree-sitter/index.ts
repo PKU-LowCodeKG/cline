@@ -6,8 +6,17 @@ import { fileExistsAtPath } from "../../utils/fs"
 import { ClineIgnoreController } from "../../core/ignore/ClineIgnoreController"
 
 // TODO: implement caching behavior to avoid having to keep analyzing project for new tasks.
+/**
+ * 按照 .clineIgnore 忽略文件的前提下，最多解析 50 个 dirPath 路径下的 “代码类型文件”，返回代码文件的 AST 字符串
+ *
+ * 目前只在 Cline 类的 `presentAssistantMessage()` 中被使用一次
+ * @param dirPath 要进行解析的目录路径
+ * @param clineIgnoreController Cline 的忽略文件控制器
+ * @returns 代码文件的 AST 字符串
+ */
 export async function parseSourceCodeForDefinitionsTopLevel(
 	dirPath: string,
+	// NOTE: 这个是 Cline 于 2025.2.9 加入的，用于过滤文件（.clineignore）
 	clineIgnoreController?: ClineIgnoreController,
 ): Promise<string> {
 	// check if the path exists
@@ -24,6 +33,7 @@ export async function parseSourceCodeForDefinitionsTopLevel(
 	// Separate files to parse and remaining files
 	const { filesToParse, remainingFiles } = separateFiles(allFiles)
 
+	// NOTE: 加载 Cline 基于 tree-sitter 实现的代码语言解析器
 	const languageParsers = await loadRequiredLanguageParsers(filesToParse)
 
 	// Parse specific files we have language parsers for
@@ -33,8 +43,11 @@ export async function parseSourceCodeForDefinitionsTopLevel(
 	const allowedFilesToParse = clineIgnoreController ? clineIgnoreController.filterPaths(filesToParse) : filesToParse
 
 	for (const filePath of allowedFilesToParse) {
+		// NOTE: 用 Cline 的代码解析函数，解析代码文件
 		const definitions = await parseFile(filePath, languageParsers, clineIgnoreController)
 		if (definitions) {
+			// NOTE: 将相对路径转换为 POSIX 格式的路径
+			// 这里的 .toPosix() 并不是原生的方法，而是在 `src\utils\path.ts` 中通过 声明合并（Declaration Merging）实现的，在不修改原生对象的情况下扩展其功能
 			result += `${path.relative(dirPath, filePath).toPosix()}\n${definitions}\n`
 		}
 		// else {
@@ -58,10 +71,16 @@ export async function parseSourceCodeForDefinitionsTopLevel(
 	return result ? result : "No source code definitions found."
 }
 
+/**
+ * 从文件中分出要解析的文件类型（代码类型文件，最多 50 个）
+ * @param allFiles 要分开的文件们
+ * @returns 要进行解析的文件和剩余文件
+ */
 function separateFiles(allFiles: string[]): {
 	filesToParse: string[]
 	remainingFiles: string[]
 } {
+	// NOTE: 定义要进行解析的文件类型（代码类型文件）
 	const extensions = [
 		"js",
 		"jsx",

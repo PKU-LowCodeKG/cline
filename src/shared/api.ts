@@ -81,6 +81,7 @@ export interface ModelInfo {
 	maxTokens?: number
 	contextWindow?: number
 	supportsImages?: boolean
+	/** Claude 加载存储的电脑操作工具定义，并评估是否有工具可以帮助解决用户的查询。 */
 	supportsComputerUse?: boolean
 	supportsPromptCache: boolean // this value is hardcoded for now
 	inputPrice?: number

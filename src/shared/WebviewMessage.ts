@@ -90,6 +90,10 @@ export interface WebviewMessage {
 	customInstructionsSetting?: string
 }
 
+/**
+ * 用户在前端对 Cline ask 的回应，在前端表现为 “接受”按钮、“拒绝”按钮、还是文本框输入答复
+ * 在 `webview-ui\src\components\chat\ChatView.tsx` 中有对应的处理逻辑
+ */
 export type ClineAskResponse = "yesButtonClicked" | "noButtonClicked" | "messageResponse"
 
 export type ClineCheckpointRestore = "task" | "workspace" | "taskAndWorkspace"

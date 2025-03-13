@@ -13,6 +13,8 @@ import deepEqual from "fast-deep-equal"
 import * as fs from "fs/promises"
 import * as path from "path"
 import * as vscode from "vscode"
+// Zod 是一个 TypeScript 优先的 schema（任何数据类型）的声明和验证库
+// https://www.npmjs.com/package/zod
 import { z } from "zod"
 import { ClineProvider, GlobalFileNames } from "../../core/webview/ClineProvider"
 import {
@@ -30,12 +32,20 @@ import { fileExistsAtPath } from "../../utils/fs"
 import { arePathsEqual } from "../../utils/path"
 import { secondsToMs } from "../../utils/time"
 export type McpConnection = {
+	/** Cline 自定义的 MCP 服务器，不是官方的 McpServer 类型 */
 	server: McpServer
 	client: Client
 	transport: StdioClientTransport
 }
 
 const AutoApproveSchema = z.array(z.string()).default([])
+
+/**
+ * Cline 定义的 StdioClientTransport 配置对象范式
+ *
+ * 官方的接口是 StdioServerParameters，Cline 自定义了这个 数据结构范式，
+ * 用 safeParse 解析 StdioServerParameters 是否符合这个预期的数据结构（可选字段可以没有）
+ */
 
 const StdioConfigSchema = z.object({
 	command: z.string(),
@@ -46,15 +56,45 @@ const StdioConfigSchema = z.object({
 	timeout: z.number().min(MIN_MCP_TIMEOUT_SECONDS).optional().default(DEFAULT_MCP_TIMEOUT_SECONDS),
 })
 
+/**
+ * 多个 MCP 服务器的信息，形如
+ * {
+ * 	mcpServers: {
+ * 		string1(服务器名称): StdioConfigSchema1,
+ * 		...
+ * 	}
+ * }
+ */
 const McpSettingsSchema = z.object({
+	/** 键是服务器名称，值是 StdioConfigSchema */
 	mcpServers: z.record(StdioConfigSchema),
 })
 
+/**
+ * Cline 基于 MCP 的 Typescript SDK 包实现的 Hub 类，支持接入 MCP 服务器，实现功能扩展。
+ * 插件的描述是：支持与本地运行的 MCP 服务器进行通信，这些服务器提供额外的工具和资源以扩展 Cline 的功能。可以使用社区创建的服务器，或者让 Cline 根据您的工作流程创建新的工具（例如，“添加一个获取最新 npm 文档的工具”）。
+ *    - 创建 MCP 服务器，服务器可以暴露资源（server.resource）、提示（prompt）和工具（tool），以便客户端使用。
+ *    - 创建 MCP 客户端，客户端能够连接到任何符合 MCP 规范的服务器。
+ * TypeScript 形式的 MCP 服务器需要连接（connect）到传输（transport）以与客户端通信。Cline 选择了 stdio 传输（StdioClientTransport）。
+ *
+ * Cline 是通过在 SYSTEM PROMPT 中：
+ * 1. 定义了 <use_mcp_tool> 和 <access_mcp_resource> 两个工具，并提供了使用示例（正如其他工具，目前 在一条 Assistant Message 中最多只允许一个 MCP 工具调用）
+ * 2. 列出了所有 connected 的 MCP 服务器的信息：服务器名称、配置信息，工具信息，资源信息
+ * 3. 如果 mode 为 full，还会给出创建新的 MCP 服务器的提示
+ *
+ * Model Context Protocol（MCP）是一个用于在应用程序和 LLM 之间提供上下文的标准化协议。它旨在将上下文提供与实际的 LLM 交互分离，从而简化开发流程并提高灵活性。
+ * @docs https://modelcontextprotocol.io/introduction
+ * @docs MCP TypeScript SDK: https://github.com/modelcontextprotocol/typescript-sdk
+ * @server https://github.com/modelcontextprotocol/servers
+ */
 export class McpHub {
 	private providerRef: WeakRef<ClineProvider>
 	private disposables: vscode.Disposable[] = []
 	private settingsWatcher?: vscode.FileSystemWatcher
+	/** chokidar 跨平台文件监视库 提供的 文件系统监视器 FS Watcher  */
 	private fileWatchers: Map<string, FSWatcher> = new Map()
+
+	/** MCP 连接对象 的数组，每个对象包括：服务器、客户端和传输。 */
 	connections: McpConnection[] = []
 	isConnecting: boolean = false
 
@@ -64,15 +104,21 @@ export class McpHub {
 		this.initializeMcpServers()
 	}
 
+	/** 返回所有 存在没有 disabled 的连接的 McpServer 对象  */
 	getServers(): McpServer[] {
 		// Only return enabled servers
 		return this.connections.filter((conn) => !conn.server.disabled).map((conn) => conn.server)
 	}
 
+	/** 返回用户在 VSCode 中对 Cline MCP 的模式设置（full, server-user-only, off）  */
 	getMode(): McpMode {
 		return vscode.workspace.getConfiguration("cline.mcp").get<McpMode>("mode", "full")
 	}
 
+	/**
+	 * 返回 MCP 服务器的路径
+	 * `~/Documents/Cline/MCP`
+	 */
 	async getMcpServersPath(): Promise<string> {
 		const provider = this.providerRef.deref()
 		if (!provider) {
@@ -82,6 +128,11 @@ export class McpHub {
 		return mcpServersPath
 	}
 
+	/**
+	 * 返回存放 Cline 的 MCP 设置文件的路径。
+	 * `[context.globalStorageUri.fsPath]/settings/cline_mcp_settings.json`
+	 * 如果该路径不存在，创建一个新的 MCP 设置文件。并设置 "mcpServers" 字段为空对象。
+	 */
 	async getMcpSettingsFilePath(): Promise<string> {
 		const provider = this.providerRef.deref()
 		if (!provider) {
@@ -102,6 +153,10 @@ export class McpHub {
 		return mcpSettingsFilePath
 	}
 
+	/**
+	 * 监视 MCP 设置文件的更改。
+	 * 利用 vscode 的 文件保存事件，当用户保存的文件是 MCP 设置文件时，解析文件内容的 mcpServers 字段，更新服务器连接。
+	 */
 	private async watchMcpSettingsFile(): Promise<void> {
 		const settingsPath = await this.getMcpSettingsFilePath()
 		this.disposables.push(
@@ -134,6 +189,10 @@ export class McpHub {
 		)
 	}
 
+	/**
+	 * 初始化 MCP 服务器
+	 * 具体来说，读取 Cline 的 MCP 设置文件的 mcpServers 字段，更新服务器连接（似乎一开始是空对象？）。
+	 */
 	private async initializeMcpServers(): Promise<void> {
 		try {
 			const settingsPath = await this.getMcpSettingsFilePath()
@@ -145,6 +204,18 @@ export class McpHub {
 		}
 	}
 
+	/**
+	 * 连接到已经存在的 MCP 服务器
+	 * 1. 为 name 的 MCP 服务器建立 client 和 transport。
+	 * 2. 配置 transport 的 onerror 和 onclose 事件处理函数。
+	 * 	  - 更新连接对象的 服务器状态为 "disconnected"。
+	 * 	  - 将 Cline 的 MCP 服务器的状态变化 通知 webview。
+	 * 3. 用 自定义的 StdioConfigSchema 检查 config 参数的合法性
+	 * 4. 构造 McpConnection 对象，加入到 connections 数组中。
+	 * 5. 将 client 通过 transport 连接到服务器。配置 tools and resources
+	 * @param name 服务器名称
+	 * @param config 用 client 连接服务器的 transport 配置对象
+	 */
 	private async connectToServer(name: string, config: StdioServerParameters): Promise<void> {
 		// Remove existing connection if it exists (should never happen, the connection should be deleted beforehand)
 		this.connections = this.connections.filter((conn) => conn.server.name !== name)
@@ -319,6 +390,11 @@ export class McpHub {
 		}
 	}
 
+	/**
+	 * 断开已经存在的服务器的连接
+	 *
+	 * 具体来说，清除服务器名称等于 参数 name 的 连接对象，关闭其 client 和 transport
+	 */
 	async deleteConnection(name: string): Promise<void> {
 		const connection = this.connections.find((conn) => conn.server.name === name)
 		if (connection) {
@@ -332,6 +408,22 @@ export class McpHub {
 		}
 	}
 
+	/**
+	 * 更新 MCP 服务器连接
+	 * 1. 清除所有的 chokidar 文件监视器
+	 * 2. 对比 newServers 的代表的新一批服务器 和 原有连接中的服务器。
+	 *    清除不在 newServers 中的服务器 所在的连接对象
+	 * 3. 找到服务器名称等于 name 的连接对象。
+	 *    - 如果不存在，新建一个连接对象
+	 *       - 为该服务器的 Transport 配置文件设置 chokidar 文件监视器
+	 *       - 连接到该服务器
+	 *    - 如果存在，若该服务器的 Transport 配置对象改变了
+	 *       - 为该服务器的 Transport 配置文件设置 chokidar 文件监视器
+	 *       - 断开该服务器的连接（清除 连接对象，关闭其 client 和 transport）
+	 *       - 连接到该服务器（TODO：为什么不用 restartConnection？）
+	 * 4. 将 Cline 的 MCP 服务器的状态变化 通知 webview
+	 * @param newServers 新一批 MCP 服务器信息（最开始是空对象，后面是 MCP 配置文件的 mcpServers 字段）
+	 */
 	async updateServerConnections(newServers: Record<string, any>): Promise<void> {
 		this.isConnecting = true
 		this.removeAllFileWatchers()
@@ -347,6 +439,7 @@ export class McpHub {
 		}
 
 		// Update or add servers
+		// name 是服务器名称，config 是 Cline 定义的 Transport 配置对象范式
 		for (const [name, config] of Object.entries(newServers)) {
 			const currentConnection = this.connections.find((conn) => conn.server.name === name)
 
@@ -375,6 +468,13 @@ export class McpHub {
 		this.isConnecting = false
 	}
 
+	/**
+	 * 1. 找到该服务器的 Transport 配置文件，为该文件设置 chokidar 文件监视器。
+	 * 该文件监视器会在 文件改变 时，重新连接 name 服务器
+	 * 2. 将 <name, watcher> 存储到 fileWatchers Map 中
+	 * @param name 服务器名称
+	 * @param config 应该是 StdioConfigSchema 类型
+	 */
 	private setupFileWatcher(name: string, config: any) {
 		const filePath = config.args?.find((arg: string) => arg.includes("build/index.js"))
 		if (filePath) {
@@ -394,11 +494,20 @@ export class McpHub {
 		}
 	}
 
+	/** 清除所有的 chokidar 文件监视器 */
 	private removeAllFileWatchers() {
 		this.fileWatchers.forEach((watcher) => watcher.close())
 		this.fileWatchers.clear()
 	}
 
+	/**
+	 * 重新连接到已经存在的 MCP 服务器
+	 * 1. 找到 MCP 服务器名称为 serverName 的连接对象
+	 * 2. 更改其 服务器 状态
+	 * 3. 断开该服务器的连接（清除 连接对象，关闭其 client 和 transport）
+	 * 4. 连接到 该服务器
+	 * @param serverName 服务器名称
+	 */
 	async restartConnection(serverName: string): Promise<void> {
 		this.isConnecting = true
 		const provider = this.providerRef.deref()
@@ -430,6 +539,13 @@ export class McpHub {
 		this.isConnecting = false
 	}
 
+	/**
+	 * 将 Cline 的 MCP 服务器的状态变化 通知 webview
+	 * 1. 读取 Cline 的 MCP 设置文件的 mcpServers 字段，将其键值（即服务器名称）记为数组
+	 * 2. 向 webview 发送 "mcpServers" 类型的消息
+	 *    - 内容是 McpServer[]（所有的连接对象的服务器信息）
+	 *    - 顺序是按照 mcpServers 中 key 的顺序
+	 */
 	private async notifyWebviewOfServerChanges(): Promise<void> {
 		// servers should always be sorted in the order they are defined in the settings file
 		const settingsPath = await this.getMcpSettingsFilePath()

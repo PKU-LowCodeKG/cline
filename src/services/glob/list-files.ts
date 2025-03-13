@@ -3,9 +3,17 @@ import os from "os"
 import * as path from "path"
 import { arePathsEqual } from "../../utils/path"
 
+/**
+ * 列出指定目录下的文件和子目录、文件。
+ * @param dirPath 要列出的目录路径
+ * @param recursive 是否递归列出子目录
+ * @param limit 返回的最大文件数
+ * @returns 返回一个包含两个元素的数组：第一个元素是找到的文件路径列表，第二个是一个布尔值，表示是否达到了限制数量。
+ */
 export async function listFiles(dirPath: string, recursive: boolean, limit: number): Promise<[string[], boolean]> {
 	const absolutePath = path.resolve(dirPath)
 	// Do not allow listing files in root or home directory, which cline tends to want to do when the user's prompt is vague.
+	// 防止列出根目录或用户主目录下的文件，这是 cline 倾向于在 user's prompt 模糊时要做的事情。
 	const root = process.platform === "win32" ? path.parse(absolutePath).root : "/"
 	const isRoot = arePathsEqual(absolutePath, root)
 	if (isRoot) {

@@ -49,6 +49,13 @@ Mention regex:
   - `mentionRegexGlobal`: Creates a global version of the `mentionRegex` to find all matches within a given string.
 
 */
+// export const mentionRegex =
+// 	/@((?:\/|\w+:\/\/)[^\s]+?|[a-f0-9]{7,40}\b|problems\b|terminal\b|git-changes\b)(?=[.,;:!?]?(?=[\s\r\n]|$))/
+
+// +? 表示非贪婪匹配（即尽可能少地匹配字符），因此需要在后面用 ?= 前瞻断言来确保
+// 1. 不匹配 标点符号或者空白符
+// 2. 标点符号或者空白符 前的 url 内容被完整匹配
+// NOTE: 2025/3/5 增加 repoCrawler 的匹配
 export const mentionRegex =
-	/@((?:\/|\w+:\/\/)[^\s]+?|[a-f0-9]{7,40}\b|problems\b|terminal\b|git-changes\b)(?=[.,;:!?]?(?=[\s\r\n]|$))/
+	/@((?:\/|\w+:\/\/)[^\s]+?|[a-f0-9]{7,40}\b|problems\b|terminal\b|git-changes\b|repoCrawler.*)(?=[.,;:!?]?(?=[\s\r\n]|$))/
 export const mentionRegexGlobal = new RegExp(mentionRegex.source, "g")

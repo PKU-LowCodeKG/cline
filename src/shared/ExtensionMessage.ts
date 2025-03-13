@@ -103,6 +103,7 @@ export interface ExtensionState {
 }
 
 export interface ClineMessage {
+	/** Cline Message 的时间戳 timestamp */
 	ts: number
 	type: "ask" | "say"
 	ask?: ClineAsk
@@ -113,6 +114,7 @@ export interface ClineMessage {
 	partial?: boolean
 	lastCheckpointHash?: string
 	isCheckpointCheckedOut?: boolean
+	/** Cline Message 对应的 API 对话在 API 对话历史中的索引 */
 	conversationHistoryIndex?: number
 	conversationHistoryDeletedRange?: [number, number] // for when conversation history is truncated for API requests
 }

@@ -70,20 +70,32 @@ type ToolResponse = string | Array<Anthropic.TextBlockParam | Anthropic.ImageBlo
 type UserContent = Array<Anthropic.ContentBlockParam>
 
 export let globalStoragePath: any;
-
+/**
+ * Cline 类是 ClineProvider 的核心类。
+ *
+ * 对于用户的一个新任务或者历史任务，在 ClineProvider 中创建一个 Cline 实例处理，一个 Cline 实例只负责处理一个任务，由 taskId 标识。
+ *
+ * Cline 实例的生命周期是：开始新任务/恢复并继续旧任务（创建 Cline 实例）-> 中断废弃当前任务（废弃 Cline 实例）
+ */
 export class Cline {
+	/** 当前 Cline 实例要处理的任务 ID，是 Date 字符串 */
 	readonly taskId: string
 	readonly apiProvider?: string
 	api: ApiHandler
 	private terminalManager: TerminalManager
 	private urlContentFetcher: UrlContentFetcher
 	browserSession: BrowserSession
+	/** 当前 Cline 实例的任务是否已经编辑过文件 */
 	private didEditFile: boolean = false
+	/** Cline 的自定义指令，只在构造函数中读入 */
 	customInstructions?: string
+	/** 用户自动批准 Cline 使用工具的 权限设置（在插件的 Auto-approve 区域，所有工具调用分为 5 种权限） */
 	autoApprovalSettings: AutoApprovalSettings
 	private browserSettings: BrowserSettings
 	private chatSettings: ChatSettings
+	/** Cline LLM API 对话历史，用作上下文的一部分提供给 各种 LLM */
 	apiConversationHistory: Anthropic.MessageParam[] = []
+	/** Cline Message 历史，用于 webview 呈现。它记录着用户的原始输入 和 cline 的 ask/say */
 	clineMessages: ClineMessage[] = []
 	private clineIgnoreController: ClineIgnoreController
 	private askResponse?: ClineAskResponse
@@ -91,10 +103,20 @@ export class Cline {
 	private askResponseImages?: string[]
 	private lastMessageTs?: number
 	private consecutiveAutoApprovedRequestsCount: number = 0
+	/** 连续发生的错误计数器（指思考失败？答复失败？没有采用工具调用？） */
 	private consecutiveMistakeCount: number = 0
 	private providerRef: WeakRef<ClineProvider>
+	/**
+	 * 当前 Cline 实例绑定的任务是否被废弃，只在 Cline 实例的 abortTask() 中被改为 true。
+	 * 所有 `abortTask()` 的地方，紧跟着 `this.cline = undefined`，即 Cline 实例被废弃。
+	 * 说明 Cline 实例的生命周期完全和其绑定的任务一致。
+	 */
 	private abort: boolean = false
 	didFinishAbortingStream = false
+	/**
+	 * 表示 Cline 实例是否被废弃。该变量只在 ClineProvider 的 cancelTask() 中被改为 true。
+	 * 说明 Cline 实例的生命周期完全和其绑定的任务一致。 
+	 */
 	abandoned = false
 	private diffViewProvider: DiffViewProvider
 	private checkpointTracker?: CheckpointTracker
@@ -108,12 +130,20 @@ export class Cline {
 	isWaitingForFirstChunk = false
 	isStreaming = false
 	private currentStreamingContentIndex = 0
+	/** Cline 的 Assistant Message 数组，TextContent | ToolUse  */
 	private assistantMessageContent: AssistantMessageContent[] = []
 	private presentAssistantMessageLocked = false
 	private presentAssistantMessageHasPendingUpdates = false
+	/**
+	 * 【主线】记录 Cline 每一轮 API 对话中，"role"为"user"的 Anthropic 消息的"content"部分。（只有 文本、图片，不包括工具调用和工具调用结果）
+	 * 在 recursivelyMakeClineRequests 中初始化，并在该函数和该函数调用的函数中更新
+	 * （只要上一轮模型的 response 解析出来的 assistant Message 不为空）
+	 * 并在下一轮 API 对话中，作为 API 对话历史的组成部分 发送给 LLM
+	 */
 	private userMessageContent: (Anthropic.TextBlockParam | Anthropic.ImageBlockParam)[] = []
 	private userMessageContentReady = false
 	private didRejectTool = false
+	/** Cline 的一个 Assistant Message 最多只允许一个 工具调用 */
 	private didAlreadyUseTool = false
 	private didCompleteReadingStream = false
 	private didAutomaticallyRetryFailedApiRequest = false
@@ -144,6 +174,8 @@ export class Cline {
 		this.autoApprovalSettings = autoApprovalSettings
 		this.browserSettings = browserSettings
 		this.chatSettings = chatSettings
+		// 【主线】如果存在历史记录，则从历史记录中恢复任务；否则，基于提供的 task 或者 images 创建新任务
+		// 根据 ClineProvider 是否传入了 historyItem 来区分
 		if (historyItem) {
 			this.taskId = historyItem.id
 			this.conversationHistoryDeletedRange = historyItem.conversationHistoryDeletedRange
@@ -175,6 +207,7 @@ export class Cline {
 
 	// Storing task to disk for history
 
+	/** 创造 [context.globalStorageUri.fsPath]/tasks 目录 */
 	private async ensureTaskDirectoryExists(): Promise<string> {
 		globalStoragePath = this.providerRef.deref()?.context.globalStorageUri.fsPath
 		if (!globalStoragePath) {
@@ -185,6 +218,17 @@ export class Cline {
 		return taskDir
 	}
 
+	// #region 当前任务的 LLM API 对话历史。
+	// 【LLM API 对话历史】
+	// 1. Cline LLM API 对话历史 均以 Anthropic.MessageParam[] 形式记录
+	// 2. 根据 `attemptApiRequest` 函数，Cline 和 LLM 交互时，将 LLM API 对话历史 发送给 ApiHandler 接口的 `createMessage` 方法
+	// 3. ApiHandler 接口由各种 LLM 实现，在 `createMessage` 方法中，将 Anthropic.MessageParam[] 形式转为符合自己的格式
+	//    - 其中 ConvertToO1Messages 和 ConvertToOpenAiMessages 转换方法比较常用
+	//    - 此外，只实现了 Gemini O1 openai 格式同 anthropic.message 相互转换的方法，但是在实际代码中并未调用这几个方法
+	// 4. 对于 LLM response，根据 `attemptApiRequest` 函数，Cline 会将 LLM response 转为 Anthropic.MessageParam[] 形式，存入 LLM API 对话历史（ApiConversationHistory 的维护）
+
+
+	/** 从 api_conversation_history.json 读取当前任务的 LLM API 对话历史数组 */
 	private async getSavedApiConversationHistory(): Promise<Anthropic.MessageParam[]> {
 		const filePath = path.join(await this.ensureTaskDirectoryExists(), GlobalFileNames.apiConversationHistory)
 		const fileExists = await fileExistsAtPath(filePath)
@@ -194,16 +238,19 @@ export class Cline {
 		return []
 	}
 
+	/** 将一条消息存入 API 对话历史数组，并保存到 api_conversation_history.json 文件 */
 	private async addToApiConversationHistory(message: Anthropic.MessageParam) {
 		this.apiConversationHistory.push(message)
 		await this.saveApiConversationHistory()
 	}
 
+	/** 重写当前任务的 API 对话历史数组 */
 	private async overwriteApiConversationHistory(newHistory: Anthropic.MessageParam[]) {
 		this.apiConversationHistory = newHistory
 		await this.saveApiConversationHistory()
 	}
 
+	/** 保存当前任务的 API 对话历史到 api_conversation_history.json 文件 */
 	private async saveApiConversationHistory() {
 		try {
 			const filePath = path.join(await this.ensureTaskDirectoryExists(), GlobalFileNames.apiConversationHistory)
@@ -213,7 +260,11 @@ export class Cline {
 			console.error("Failed to save API conversation history:", error)
 		}
 	}
+	// #endregion
 
+	// #region Cline Message 消息数组的维护（用于 webview 呈现），会影响到任务历史 HistoryItem
+
+	/** 读取 uiMessages 文件中记录的 Cline Message 数组，只在 `resumeTaskFromHistory()` 中使用  */
 	private async getSavedClineMessages(): Promise<ClineMessage[]> {
 		const filePath = path.join(await this.ensureTaskDirectoryExists(), GlobalFileNames.uiMessages)
 		if (await fileExistsAtPath(filePath)) {
@@ -230,6 +281,8 @@ export class Cline {
 		return []
 	}
 
+
+	/** 将一条 ClineMessage 存入消息数组，并设置它对应的 API 对话索引（只在 ask 和 say 中调用） */
 	private async addToClineMessages(message: ClineMessage) {
 		// these values allow us to reconstruct the conversation history at the time this cline message was created
 		// it's important that apiConversationHistory is initialized before we add cline messages
@@ -244,18 +297,27 @@ export class Cline {
 		await this.saveClineMessages()
 	}
 
+
+	/**
+	 * 【Cline Message】更新当前 Cline 实例 绑定的 任务的 时间戳、API 消耗指标等
+	 *
+	 * 因 Cline Message 数组的变动而对任务历史 HistoryItem 进行更新
+	 */
 	private async saveClineMessages() {
 		try {
 			const taskDir = await this.ensureTaskDirectoryExists()
 			const filePath = path.join(taskDir, GlobalFileNames.uiMessages)
 			await fs.writeFile(filePath, JSON.stringify(this.clineMessages))
 			// combined as they are in ChatView
+			// NOTE: 在不影响原数组内容的前提下，计算 ClineMessages 数组的 API 指标
 			const apiMetrics = getApiMetrics(combineApiRequests(combineCommandSequences(this.clineMessages.slice(1))))
 			const taskMessage = this.clineMessages[0] // first message is always the task say
+			// NOTE: 找到最后一个 不是“恢复任务”/“恢复已完成的任务” 的消息，用这个消息的时间戳作为 当前任务历史 的时间戳
 			const lastRelevantMessage =
 				this.clineMessages[
 				findLastIndex(this.clineMessages, (m) => !(m.ask === "resume_task" || m.ask === "resume_completed_task"))
 				]
+			// NOTE: 计算 当前任务目录 tasks 的大小
 			let taskDirSize = 0
 			try {
 				// getFolderSize.loose silently ignores errors
@@ -281,7 +343,19 @@ export class Cline {
 			console.error("Failed to save cline messages:", error)
 		}
 	}
+	// #endregion
 
+	// #region Checkpoint 的恢复和保存，用于实现 diff 功能
+
+
+	/**
+	 * 恢复到指定的时间点。
+	 *
+	 * 该函数根据提供的消息时间戳查找对应的消息，并根据指定的恢复类型执行恢复操作。
+	 * ClineProvider 中 监听到"checkpointRestore" 使用
+	 * @param messageTs - 要恢复到的消息的时间戳。
+	 * @param restoreType - 恢复类型，可以是 "task"（任务）、"workspace"（工作区）或 "taskAndWorkspace"（任务和工作区）。
+	 */
 	async restoreCheckpoint(messageTs: number, restoreType: ClineCheckpointRestore) {
 		const messageIndex = this.clineMessages.findIndex((m) => m.ts === messageTs)
 		const message = this.clineMessages[messageIndex]
@@ -314,6 +388,7 @@ export class Cline {
 				}
 				if (message.lastCheckpointHash && this.checkpointTracker) {
 					try {
+						// 调用 CheckpointTracker 的 resetHead 方法 定位到指定的提交
 						await this.checkpointTracker.resetHead(message.lastCheckpointHash)
 					} catch (error) {
 						const errorMessage = error instanceof Error ? error.message : "Unknown error"
@@ -390,13 +465,22 @@ export class Cline {
 			await this.providerRef.deref()?.postMessageToWebview({ type: "relinquishControl" })
 		}
 	}
-
+	/**
+	 * 展示多文件差异。
+	 * 该函数根据特定的消息时间戳向用户展示多个文件的差异。
+	 * 可以选择显示自上次任务完成以来的所有更改，或显示自某个快照以来的更改。
+	 * 在ClineProvider中 "checkpointDiff" 调用
+	 *
+	 * @param messageTs - 消息的时间戳，用于标识要查看差异的消息。
+	 * @param seeNewChangesSinceLastTaskCompletion - 布尔值，指示是否显示自上次任务完成以来的新更改。
+	 */
 	async presentMultifileDiff(messageTs: number, seeNewChangesSinceLastTaskCompletion: boolean) {
 		const relinquishButton = () => {
 			this.providerRef.deref()?.postMessageToWebview({ type: "relinquishControl" })
 		}
 
 		console.log("presentMultifileDiff", messageTs)
+		/** 根据时间戳找到对应消息 */
 		const messageIndex = this.clineMessages.findIndex((m) => m.ts === messageTs)
 		const message = this.clineMessages[messageIndex]
 		if (!message) {
@@ -428,7 +512,7 @@ export class Cline {
 				return
 			}
 		}
-
+		/** 包含文件的相对路径 绝对路径 和在不同状态下的内容 */
 		let changedFiles:
 			| {
 				relativePath: string
@@ -513,7 +597,11 @@ export class Cline {
 		)
 		relinquishButton()
 	}
-
+	/**
+	 * 异步检查最新的任务完成是否包含与上次完成相比的新更改。
+	 *
+	 * @returns {Promise<boolean>} - 如果有新的更改返回 `true`，否则返回 `false`。
+	 */
 	async doesLatestTaskCompletionHaveNewChanges() {
 		const messageIndex = findLastIndex(this.clineMessages, (m) => m.say === "completion_result")
 		const message = this.clineMessages[messageIndex]
@@ -574,10 +662,30 @@ export class Cline {
 
 		return false
 	}
+	// #endregion
 
 	// Communicate with webview
 
 	// partial has three valid states true (partial message), false (completion of partial message), undefined (individual complete message)
+	/**
+	 * 【主线】
+	 * Cline ask 用于向用户询问，在前端一般表现为 Cline wants to do sth (edit this file, execute this command, etc.)
+	 * 
+	 * 【ask 和 say 的区别】 ask 在向用户询问后，使用 pWaitFor 库等待用户答复
+	 *
+	 * Cline askResponse 是用户在前端对 Cline ask 的回应：“接受”按钮、“拒绝”按钮、还是文本框输入答复。
+	 * 无论是哪一种，都是通过 `vscode.postMessage()` 给后端传递 "askResponse" 类型消息，再由 ClineProvider 定义的 onDidReceiveMessage 处理。
+	 * 由 `handleWebviewAskResponse()` 函数设置 Cline 实例的 askResponse 3 个属性。
+	 *
+	 * 【ask 和 say 的共性】
+	 * 1. ask 和 say 的 type 直接涉及前端，比如以不同的 ui 元素展示。通过前端交互影响后端。
+	 * 2. ask 和 say 函数本身只会影响后端的 Cline Message，不会直接影响 API 对话历史。
+	 *    只不过 Cline Message 的一部分内容会在别处转为 API 对话历史
+	 * 3. partial 变量有三个有效的状态：
+	 *    - true：表示当前是一个部分消息，即这条消息还没有完整接收或处理，只有部分内容。【被截断的消息的一部分】
+	 *    - false：表示这条消息已经完成，即消息的内容已经完整地接收或处理完毕。【被截断的消息的所有部分拼合完整】
+	 *    - undefined：表示这条消息是一个独立的完整消息。【未被截断的完整独立消息】
+	 */
 	async ask(
 		type: ClineAsk,
 		text?: string,
@@ -587,12 +695,23 @@ export class Cline {
 		text?: string
 		images?: string[]
 	}> {
+		// NOTE: 这段话是说：
+		// 如果 Cline 实例被 Clineprovider 中止，尽管 Cline 实例本身不再活跃，但之相关的异步任务（a promise）仍然存在并在后台执行；
+		// 因为这个任务已经附加到了新的 Cline 实例上（Clineprovider 只维护一个 Cline），所以我们不希望将其结果发送到当前 webview 界面；
+		// 因此，我们可以安全地忽略任何依然活跃的 promise 的结果，这个 Cline 类将被释放。
+		// （尽管我们在提供者中设置了 Cline = undefined，但这只是删除对此实例的引用，实例仍然存在，只有当所有对该实例的引用都被清除且它所涉及的所有异步操作都完成了，这个实例才会被垃圾回收机制自动清理掉。）
+
 		// If this Cline instance was aborted by the provider, then the only thing keeping us alive is a promise still running in the background, in which case we don't want to send its result to the webview as it is attached to a new instance of Cline now. So we can safely ignore the result of any active promises, and this class will be deallocated. (Although we set Cline = undefined in provider, that simply removes the reference to this instance, but the instance is still alive until this promise resolves or rejects.)
 		if (this.abort) {
 			throw new Error("Cline instance aborted")
 		}
 		let askTs: number
 		if (partial !== undefined) {
+			// 如果 partial 为真，则
+			// 根据 ClineMessage 队列上一条消息的状态，判断当前的 ask 是否在更新 上一条“部分消息”
+			// 如果是，那么更新上一条“部分消息”。并向 webview 发送 "partialMessage"，附上更新后的上一条“部分消息”
+			// 如果不是，那么添加一条新的“部分消息”。并向 webview 发送当前的 插件状态
+			// 忽略当前 ask 请求
 			const lastMessage = this.clineMessages.at(-1)
 			const isUpdatingPreviousPartial =
 				lastMessage && lastMessage.partial && lastMessage.type === "ask" && lastMessage.ask === type
@@ -684,9 +803,14 @@ export class Cline {
 			await this.providerRef.deref()?.postStateToWebview()
 		}
 
+		// NOTE: pWaitFor 库等待 this.askResponse 不为 undefined 或者 this.lastMessageTs 不等于 askTs 这两个条件之一满足（每隔 100ms 检查一次）
+		console.log("askTs：", askTs)
+		console.log("this.lastMessageTs：", this.lastMessageTs)
 		await pWaitFor(() => this.askResponse !== undefined || this.lastMessageTs !== askTs, { interval: 100 })
+		// NOTE: 当前 ask 请求的时间戳与 发起请求时的时间戳不一致（即消息数组中最后一条消息的时间戳
+		// 说明 这是发送多个 ask 请求的场景中（例如 command_output 的情况）。此时，当前 ask 请求已经被后续请求覆盖，应该被忽略
 		if (this.lastMessageTs !== askTs) {
-			throw new Error("Current ask promise was ignored") // could happen if we send multiple asks in a row i.e. with command_output. It's important that when we know an ask could fail, it is handled gracefully
+			throw new Error("Current ask promise was ignored 测试") // could happen if we send multiple asks in a row i.e. with command_output. It's important that when we know an ask could fail, it is handled gracefully
 		}
 		const result = {
 			response: this.askResponse!,
@@ -784,6 +908,14 @@ export class Cline {
 		}
 	}
 
+
+	/**
+	 * 调用 Cline Say 方法，向用户展示 “工具调用时参数缺失” 的错误消息。
+	 * @param toolName 发生参数缺失的工具名称
+	 * @param paramName 缺失的参数名称
+	 * @param relPath 相对路径
+	 * @returns Cline 的格式化 工具错误 响应
+	 */
 	async sayAndCreateMissingParamError(toolName: ToolUseName, paramName: string, relPath?: string) {
 		await this.say(
 			"error",
@@ -793,6 +925,13 @@ export class Cline {
 		return formatResponse.toolError(formatResponse.missingToolParameterError(paramName))
 	}
 
+
+	/**
+	 * 如果当前 Cline 实例的 clineMessages 历史队列的最后一条消息 “不完整”，且其 ask 或 say 属性与提供的 askOrSay 参数相同，则：
+	 * 1. 删除该消息。
+	 * 2. 保存 Cline Messages 队列的状态。
+	 * 3. 向 webview 发送当前插件状态。
+	 */
 	async removeLastPartialMessageIfExistsWithType(type: "ask" | "say", askOrSay: ClineAsk | ClineSay) {
 		const lastMessage = this.clineMessages.at(-1)
 		if (lastMessage?.partial && lastMessage.type === type && (lastMessage.ask === askOrSay || lastMessage.say === askOrSay)) {
@@ -1034,6 +1173,15 @@ export class Cline {
 
 	// Task lifecycle
 
+
+	// #region Cline 实例中 Task 的生命周期：开始新任务/恢复并继续旧任务、中断当前任务
+	/**
+	 * 【主线】基于任务描述 task 或者 提供的图片 image 开始一个新任务
+	 * 1. 清空 Cline 实例的 对话历史（API）和 ClineMessage 消息（webview 显示）
+	 * 2. say("text", task, images)
+	 * 3. 初始化任务循环
+	 * 【这个函数只在 Cline 构造函数使用，再次说明 Cline 实例的生命周期 和 任务 相同，一个 Cline 实例只能处理一个 任务】
+	 */
 	private async startTask(task?: string, images?: string[]): Promise<void> {
 		// conversationHistory (for API) and clineMessages (for webview) need to be in sync
 		// if the extension process were killed, then on restart the clineMessages might not be empty, so we need to set it to [] when we create a new Cline client (otherwise webview would show stale messages from previous session)
@@ -1042,6 +1190,8 @@ export class Cline {
 
 		await this.providerRef.deref()?.postStateToWebview()
 
+		// 这是一个新任务的第一条 ClineMessage，用于原样展示用户输入的任务描述
+		// 同时，在后续过程中还会取 第[0]条作为该任务的描述
 		await this.say("text", task, images)
 
 		// 任务开始就调用SearchAgent
@@ -1062,6 +1212,16 @@ export class Cline {
 		)
 	}
 
+	/**
+	 * 【主线】基于 Cline 实例构造时的 historyItem 属性，继续完成一个旧任务【恢复一个历史任务】
+	 * 1. 读取 uiMessages 文件中记录的 Cline Message 数组；
+	 * 2. 寻找可能存在的上一个 “恢复历史任务” 的消息（ask 属性为 resume_task 或 resume_completed_task）
+	 *    删除该消息之后的所有消息；【放弃上一次恢复】
+	 * 3. 删除没有任何“部分内容”流式传输的 api_req_started
+	 * 4. 用修改后的 ClineMessage 数组覆盖保存
+	 * 【之后是同步 API 对话历史，这里暂时略过】
+	 * 【这个函数只在 Cline 构造函数使用，再次说明 Cline 实例的生命周期 和 任务 相同，一个 Cline 实例只能处理一个 任务】
+	 */
 	private async resumeTaskFromHistory() {
 		// UPDATE: we don't need this anymore since most tasks are now created with checkpoints enabled
 		// right now we let users init checkpoints for old tasks, assuming they're continuing them from the same workspace (which we never tied to tasks, so no way for us to know if it's opened in the right workspace)
@@ -1099,23 +1259,16 @@ export class Cline {
 
 		// Now present the cline messages to the user and ask if they want to resume (NOTE: we ran into a bug before where the apiconversationhistory wouldnt be initialized when opening a old task, and it was because we were waiting for resume)
 		// This is important in case the user deletes messages without resuming the task first
+		// NOTE: 现在向用户呈现cline消息并询问他们是否想要恢复（注意：我们之前遇到了一个错误，当打开旧任务时，apiconversationhistory 不会初始化，这是因为我们正在等待resume）在用户删除消息而不首先恢复任务的情况下，这一点很重要
 		this.apiConversationHistory = await this.getSavedApiConversationHistory()
 
+		// 从 ClineMessage 数组中找到最后一个非 “恢复历史任务” 的消息（因为之前可能进行过多次“恢复任务”）
 		const lastClineMessage = this.clineMessages
 			.slice()
 			.reverse()
 			.find((m) => !(m.ask === "resume_task" || m.ask === "resume_completed_task")) // could be multiple resume tasks
-		// const lastClineMessage = this.clineMessages[lastClineMessageIndex]
-		// could be a completion result with a command
-		// const secondLastClineMessage = this.clineMessages
-		// 	.slice()
-		// 	.reverse()
-		// 	.find(
-		// 		(m, index) =>
-		// 			index !== lastClineMessageIndex && !(m.ask === "resume_task" || m.ask === "resume_completed_task")
-		// 	)
-		// (lastClineMessage?.ask === "command" && secondLastClineMessage?.ask === "completion_result")
 
+		// 判断该消息的 ask 属性，以确定要恢复的任务 是否已经完成
 		let askType: ClineAsk
 		if (lastClineMessage?.ask === "completion_result") {
 			askType = "resume_completed_task"
@@ -1125,6 +1278,12 @@ export class Cline {
 
 		this.isInitialized = true
 
+		/**
+		 * Cline 向用户询问是否恢复任务。
+		 * 根据 `webview-ui\src\components\chat\ChatView.tsx` 中的逻辑（特别是 useDeepCompareEffect）：
+		 * askType = "resume_task"，前端按钮显示为 "Resume Task"
+		 * askType = "resume_completed_task"，前端按钮显示为 "Start New Task"【意思就是说完整的任务不让继续编辑了？】
+		 */
 		const { response, text, images } = await this.ask(askType) // calls poststatetowebview
 		let responseText: string | undefined
 		let responseImages: string[] | undefined
@@ -1147,6 +1306,7 @@ export class Cline {
 		let modifiedOldUserContent: UserContent // either the last message if its user message, or the user message before the last (assistant) message
 		let modifiedApiConversationHistory: Anthropic.Messages.MessageParam[] // need to remove the last user message to replace with new modified user message
 		if (existingApiConversationHistory.length > 0) {
+			// 【吐槽】为什么不用 const lastMessage = existingApiConversationHistory.at(-1)
 			const lastMessage = existingApiConversationHistory[existingApiConversationHistory.length - 1]
 
 			if (lastMessage.role === "assistant") {
@@ -1273,10 +1433,29 @@ export class Cline {
 		await this.initiateTaskLoop(newUserContent, false)
 	}
 
+	/**
+	 * 【主线】初始化任务循环，对 userContent 进行递归处理
+	 *
+	 * 【LLM API 对话】userContent 是 Cline 的 API 对话中，"role"为"user"的 Anthropic 消息的"content"部分。它是一个对象数组，包括：文本、图片、工具调用、工具调用结果
+	 *
+	 * 任务的完成和 "attempt_completion" 工具的调用相关：
+	 * 1. 任务分配与工具调用：Cline 接受任务，并通过调用不同的工具来完成该任务。如果任务没有被标记为已完成（即没有调用 attempt_completion 工具），系统会继续将工具的响应反馈给 Cline，直到他调用 attempt_completion 或不再使用工具。
+	 * 2. 任务完成检查：如果 Cline 在一段时间内没有再调用工具，系统会提示他检查任务是否完成，并建议他调用 attempt_completion 来结束任务。如果他继续使用工具，系统会继续执行任务。
+	 * 3. 最大请求限制：为了防止无限循环的请求，系统对每个任务有 MAX_REQUESTS_PER_TASK 的限制。如果 Cline 的请求达到上限，系统会强制他完成任务。
+	 *
+	 * 当执行 `abortTask()` 时，this.abort 被设置为 true
+	 * 1. `recursivelyMakeClineRequests()` 会打破递归，返回 true。终止 while 循环。
+	 * 2. while 循环也会因为 this.abort 被设置为 true 而结束。
+	 * @param userContent Cline 的 API 对话中，"role"为"user"的 Anthropic 消息的"content"部分。它是一个对象数组，包括：文本、图片、工具调用、工具调用结果
+	 * @param isNewTask 是否是新任务
+	 */
 	private async initiateTaskLoop(userContent: UserContent, isNewTask: boolean): Promise<void> {
 		let nextUserContent = userContent
+		// 是否包括当前工作目录下的文件列表
 		let includeFileDetails = true
 		while (!this.abort) {
+			// NOTE: 只在最开始的时候（while 的第一次循环，下面这个函数的第一层递归） 包括当前工作目录下的文件列表。
+			console.log("开始递归请求时的 userContent", nextUserContent)
 			const didEndLoop = await this.recursivelyMakeClineRequests(nextUserContent, includeFileDetails, isNewTask)
 			includeFileDetails = false // we only need file details the first time
 
@@ -1284,7 +1463,9 @@ export class Cline {
 			// There is a MAX_REQUESTS_PER_TASK limit to prevent infinite requests, but Cline is prompted to finish the task as efficiently as he can.
 
 			//const totalCost = this.calculateApiCost(totalInputTokens, totalOutputTokens)
+			// NOTE: 目前 Cline 的 task 永远不会“完成”。didEndLoop 只有当用户达到最大请求并拒绝重置计数时才会发生。
 			if (didEndLoop) {
+				console.log("任务完成")
 				// For now a task never 'completes'. This will only happen if the user hits max requests and denies resetting the count.
 				//this.say("task_completed", `Task completed. Total API usage cost: ${totalCost}`)
 				break
@@ -1293,6 +1474,7 @@ export class Cline {
 				// 	"tool",
 				// 	"Cline responded with only text blocks but has not called attempt_completion yet. Forcing him to continue with task..."
 				// )
+				// NOTE: `recursivelyMakeClineRequests()` 结束但是返回了 false（即 没有调用 attempt_completion 工具），记录一次错误，利用外层 while 循环继续执行任务
 				nextUserContent = [
 					{
 						type: "text",
@@ -1304,6 +1486,17 @@ export class Cline {
 		}
 	}
 
+	/**
+	 * 【主线】中断（废弃） Cline 实例绑定的当前任务。
+	 *
+	 * 该函数是唯一修改 this.abort 的地方。因此 说是“中断”，实际上是彻底废弃了当前任务。
+	 * 此外，所有 `abortTask()` 的地方，紧跟着 `this.cline = undefined`，即 Cline 实例被废弃。
+	 * 因此，Cline 实例会在 废弃其绑定的任务后 被垃圾回收。
+	 *
+	 * 1. 将 abort 标志设置为 true，以停止任何自主运行的 Promise。
+	 * 2. 调用工具类， 释放所有终端资源、关闭浏览器、关闭浏览器会话、释放忽略控制器资源。
+	 * 3. 最后等待 diffViewProvider 的 revertChanges 方法完成，确保目录和文件在重新启动任务之前已恢复到检查点状态。
+	 */
 	async abortTask() {
 		this.abort = true // will stop any autonomously running promises
 		this.terminalManager.disposeAll()
@@ -1312,6 +1505,7 @@ export class Cline {
 		this.clineIgnoreController.dispose()
 		await this.diffViewProvider.revertChanges() // need to await for when we want to make sure directories/files are reverted before re-starting the task from a checkpoint
 	}
+	// #endregion
 
 	// Checkpoints
 
@@ -1463,6 +1657,8 @@ export class Cline {
 		}
 	}
 
+
+	/** 根据 用户自动批准 Cline 使用工具的 权限设置，将工具调用分为 5 种权限，并给出是否允许 */
 	shouldAutoApproveTool(toolName: ToolUseName): boolean {
 		if (this.autoApprovalSettings.enabled) {
 			switch (toolName) {
@@ -1494,8 +1690,25 @@ export class Cline {
 		return statusCode && !message.includes(statusCode.toString()) ? `${statusCode} - ${message}` : message
 	}
 
+
+	/**
+	 * 【主线】该函数是一个异步生成器函数，非常适合处理需要逐步获取的 API 数据流
+	 *
+	 * 【核心交互】以 ApiStreamChunk 形式（"text"、"reasoning"、"usage" 三种类型）流式返回 LLM 的回复结果
+	 * 1. 读取工具支持配置（MCP、Claude Computer Use）
+	 * 2. 结合 cwd、模型对工具支持情况、MCP Hub 和浏览器设置等信息 生成 `SYSTEM PROMPT`
+	 *    - SYSTEM PROMPT 给出了目前 Cline 定义的 ToolUse 信息（功能描述 + 参数）
+	 *    - 换言之，**Cline 中工具的使用完全是由模型来最终决定的，用户的信息只能作为诱导模型的因素**
+	 * 3. 获取用户自定义指令（Custom Instructions）、.clinerules 文件中的指令、.clineignore 文件中的内容，生成相应的 `User Instructions` 提示
+	 * 4. 如果之前的 API 请求的 token 使用量接近上下文窗口的最大值，则截断 LLM API 对话历史记录
+	 * 5. `SYSTEM PROMPT` + `User Instructions` + 截断后的 LLM API 对话历史记录，提供给模型
+	 * 6. 获取返回的流并创建异步迭代器。处理 API 请求和重试
+	 * @param previousApiReqIndex 上一个 api_req_started 在 ClineMessage 数组中的索引，以检查 token 使用情况并确定是否需要截断对话历史记录
+	 * @returns {ApiStream} 一个异步生成器，用于逐步获取 API 数据流
+	 */
 	async *attemptApiRequest(previousApiReqIndex: number): ApiStream {
 		// Wait for MCP servers to be connected before generating system prompt
+		// 1. 使用 pWaitFor 等待直到 MCP 服务器连接完成（最多 10 秒）
 		await pWaitFor(() => this.providerRef.deref()?.mcpHub?.isConnecting !== true, { timeout: 10_000 }).catch(() => {
 			console.error("MCP servers failed to connect in time")
 		})
@@ -1505,13 +1718,17 @@ export class Cline {
 			throw new Error("MCP hub not available")
 		}
 
+		// 2. 读取 cline 配置：是否禁用浏览器工具、是否支持 Computer Use 功能（Claude Computer Use API，操作电脑工具）
+		// https://docs.anthropic.com/en/docs/build-with-claude/computer-use
 		const disableBrowserTool = vscode.workspace.getConfiguration("cline").get<boolean>("disableBrowserTool") ?? false
 		const modelSupportsComputerUse = this.api.getModel().info.supportsComputerUse ?? false
 
 		const supportsComputerUse = modelSupportsComputerUse && !disableBrowserTool // only enable computer use if the model supports it and the user hasn't disabled it
 
+		// 3. 使用 SYSTEM_PROMPT 函数生成一个系统提示，这个提示包含了 cwd、模型对工具支持情况、MCP Hub 和浏览器设置等信息。
 		let systemPrompt = await SYSTEM_PROMPT(cwd, supportsComputerUse, mcpHub, this.browserSettings)
 
+		// 4. 获取用户自定义指令（Custom Instructions）、.clinerules 文件中的指令、.clineignore 文件中的内容，生成相应的 User Instructions 提示
 		let settingsCustomInstructions = this.customInstructions?.trim()
 		const preferredLanguage = getLanguageKey(
 			vscode.workspace.getConfiguration("cline").get<LanguageDisplay>("preferredLanguage"),
@@ -1575,7 +1792,9 @@ export class Cline {
 		}
 
 		// If the previous API request's total token usage is close to the context window, truncate the conversation history to free up space for the new request
+		// 5. 如果之前的 API 请求的 token 使用量接近上下文窗口的最大值，则截断对话历史记录，以便为新请求腾出空间。
 		if (previousApiReqIndex >= 0) {
+			// 5-1. 如果 previousApiReqIndex 大于或等于 0，则获取上一个请求的信息。通过解析 clineMessages 中的历史记录，计算出 tokensIn、tokensOut、cacheWrites 和 cacheReads 的总和。
 			const previousRequest = this.clineMessages[previousApiReqIndex]
 			if (previousRequest && previousRequest.text) {
 				const { tokensIn, tokensOut, cacheWrites, cacheReads }: ClineApiReqInfo = JSON.parse(previousRequest.text)
@@ -1585,7 +1804,9 @@ export class Cline {
 				if (this.api instanceof OpenAiHandler && this.api.getModel().id.toLowerCase().includes("deepseek")) {
 					contextWindow = 64_000
 				}
+				// 5-2. 根据不同的模型（如 DeepSeek、Claude）的 contextWindow，计算出最大允许的 token 数量。
 				let maxAllowedSize: number
+				// 针对不同模型设置窗口大小
 				switch (contextWindow) {
 					case 64_000: // deepseek models
 						maxAllowedSize = contextWindow - 27_000
@@ -1601,6 +1822,7 @@ export class Cline {
 				}
 
 				// This is the most reliable way to know when we're close to hitting the context window.
+				// 5-3 如果当前 token 数量超过了上下文窗口的最大值，则选择保留对话的一部分（例如保留四分之一或二分之一），并更新 `conversationHistoryDeletedRange` 来保存已删除的历史记录。
 				if (totalTokens >= maxAllowedSize) {
 					// Since the user may switch between models with different context windows, truncating half may not be enough (ie if switching from claude 200k to deepseek 64k, half truncation will only remove 100k tokens, but we need to remove much more)
 					// So if totalTokens/2 is greater than maxAllowedSize, we truncate 3/4 instead of 1/2
@@ -1608,6 +1830,7 @@ export class Cline {
 					const keep = totalTokens / 2 > maxAllowedSize ? "quarter" : "half"
 
 					// NOTE: it's okay that we overwriteConversationHistory in resume task since we're only ever removing the last user message and not anything in the middle which would affect this range
+					// 调用 getNextTruncationRange 方法 计算出需要截断的信息范围
 					this.conversationHistoryDeletedRange = getNextTruncationRange(
 						this.apiConversationHistory,
 						this.conversationHistoryDeletedRange,
@@ -1620,15 +1843,18 @@ export class Cline {
 		}
 
 		// conversationHistoryDeletedRange is updated only when we're close to hitting the context window, so we don't continuously break the prompt cache
+		// 根据计算出的截断范围，重新构造需要保留的信息
 		const truncatedConversationHistory = getTruncatedMessages(
 			this.apiConversationHistory,
 			this.conversationHistoryDeletedRange,
 		)
 
+		// 6. 使用 createMessage 方法生成 API 请求，传入生成的 systemPrompt 和经过截断的 LLM API 对话历史。获取返回的流并创建异步迭代器。【核心交互】
 		let stream = this.api.createMessage(systemPrompt, truncatedConversationHistory)
 
 		const iterator = stream[Symbol.asyncIterator]()
 
+		// 7. 处理 API 请求失败与重试
 		try {
 			// awaiting first chunk to see if it will throw an error
 			this.isWaitingForFirstChunk = true
@@ -1654,6 +1880,8 @@ export class Cline {
 				await this.say("api_req_retried")
 			}
 			// delegate generator output from the recursive call
+			// NOTE: 如果请求失败，递归调用并传递 委托递归调用的生成器结果
+			// yield* 是一个特殊的语法，用于将另一个生成器的所有输出传递到当前生成器中。
 			yield* this.attemptApiRequest(previousApiReqIndex)
 			return
 		}
@@ -1687,6 +1915,8 @@ export class Cline {
 			//throw new Error("No more content blocks to stream! This shouldn't happen...") // remove and just return after testing
 		}
 
+		// 【吐槽】这里为什么不加类型注解啊，明明就是 AssistantMessageContent 类型
+		// const block: AssistantMessageContent = cloneDeep(this.assistantMessageContent[this.currentStreamingContentIndex])
 		const block = cloneDeep(this.assistantMessageContent[this.currentStreamingContentIndex]) // need to create copy bc while stream is updating the array, it could be updating the reference block properties too
 		switch (block.type) {
 			case "text": {
@@ -1746,6 +1976,7 @@ export class Cline {
 				break
 			}
 			case "tool_use":
+				/** 将 ToolUseName 和 ToolUseParams 转为工具的描述信息。 */
 				const toolDescription = () => {
 					switch (block.name) {
 						case "execute_command":
@@ -1778,6 +2009,7 @@ export class Cline {
 					}
 				}
 
+				// 如果用户拒绝使用工具，则将“跳过后续的工具内容（跳过一个完整的工具 或者 打断的部分工具）” 的消息添加到 userMessageContent 中
 				if (this.didRejectTool) {
 					// ignore any tool content after user has rejected tool once
 					if (!block.partial) {
@@ -1795,6 +2027,7 @@ export class Cline {
 					break
 				}
 
+				// 如果用户已经使用了工具，由于一个 Assistant Message 最多只允许一个 工具调用，将警告的消息添加到 userMessageContent 中
 				if (this.didAlreadyUseTool) {
 					// ignore any content after a tool has already been used
 					this.userMessageContent.push({
@@ -1804,6 +2037,12 @@ export class Cline {
 					break
 				}
 
+				/**
+				 * 1. 将工具调用的描述、工具调用的结果 2 条 Anthropic.Messages （文本或图片）
+				 *    添加到 Cline 实例的 userMessageContent 属性
+				 * 2. 设置 didAlreadyUseTool 为 true，以防止在同一消息中使用多个工具。
+				 * @param content 工具的结果
+				 */
 				const pushToolResult = (content: ToolResponse) => {
 					this.userMessageContent.push({
 						type: "text",
@@ -1840,6 +2079,13 @@ export class Cline {
 					}
 				}
 
+				/**
+				 * 执行 ClineAsk 类型的请求（这里应该主要是工具调用请求 "tool"）
+				 * 如果用户拒绝了请求，则返回 false，否则返回 true。
+				 * @param type 要执行的 ClineAsk 类型
+				 * @param partialMessage 不完整的字符串消息
+				 * @returns 用户是否批准了 ClineAsk 类型的请求
+				 */
 				const askApproval = async (type: ClineAsk, partialMessage?: string) => {
 					const { response, text, images } = await this.ask(type, partialMessage, false)
 					if (response !== "yesButtonClicked") {
@@ -1913,6 +2159,7 @@ export class Cline {
 					await this.browserSession.closeBrowser()
 				}
 
+				// 【核心交互】各种工具"tool_use"的处理
 				switch (block.name) {
 					case "write_to_file":
 					case "replace_in_file": {
@@ -2325,13 +2572,16 @@ export class Cline {
 							break
 						}
 					}
+					// 【AST】目前唯一使用代码解析的工具
 					case "list_code_definition_names": {
 						const relDirPath: string | undefined = block.params.path
+						// 向前端传递的参数是 "listCodeDefinitionNames"，显示不同的提示文字（webview-ui\src\components\chat\ChatRow.tsx）
 						const sharedMessageProps: ClineSayTool = {
 							tool: "listCodeDefinitionNames",
 							path: getReadablePath(cwd, removeClosingTag("path", relDirPath)),
 						}
 						try {
+							// 如果当前 Assisant Message 是“不完整”的
 							if (block.partial) {
 								const partialMessage = JSON.stringify({
 									...sharedMessageProps,
@@ -2346,6 +2596,8 @@ export class Cline {
 								}
 								break
 							} else {
+								// 如果当前 Assistant Message 是“完整的”
+								// NOTE: 如果没有提供 相对路径工具参数 relDirPath，则将 consecutiveMistakeCount 加 1，并将 “工具调用时参数缺失” 的错误消息 添加到 userMessageContent 中
 								if (!relDirPath) {
 									this.consecutiveMistakeCount++
 									pushToolResult(await this.sayAndCreateMissingParamError("list_code_definition_names", "path"))
@@ -2355,6 +2607,7 @@ export class Cline {
 
 								this.consecutiveMistakeCount = 0
 
+								// NOTE: 解析绝对路径下的 代码文件，生成 AST 字符串
 								const absolutePath = path.resolve(cwd, relDirPath)
 								const result = await parseSourceCodeForDefinitionsTopLevel(
 									absolutePath,
@@ -3039,6 +3292,7 @@ export class Cline {
 							break
 						}
 					}
+					// 【核心交互】如果没有其他工具可以执行，那么正常来说，就会执行这个工具
 					case "attempt_completion": {
 						/*
 						this.consecutiveMistakeCount = 0
@@ -3132,6 +3386,7 @@ export class Cline {
 									if (lastMessage && lastMessage.ask !== "command") {
 										// havent sent a command message yet so first send completion_result then command
 										await this.say("completion_result", result, undefined, false)
+										//  任务完成或尝试完成 创建一个CheckPoint
 										await this.saveCheckpoint(true)
 										await addNewChangesFlagToLastCompletionResultMessage()
 										telemetryService.captureTaskCompleted(this.taskId)
@@ -3234,6 +3489,16 @@ export class Cline {
 		}
 	}
 
+
+	/**
+	 * 【主线】递归地发出 Cline 请求。一些值得注意的点：
+	 * 1. 解析上一轮递归中的 userContent（目前只解析 "@" 辅助功能）和当前的环境信息，用解析结果更新 userContent
+	 * 2. 通过更新 userContent 和 ClineMessage 数组，创造和 LLM 交互的 "role"为"user" 的信息
+	 * 3. 处理 LLM response 的流式结果 ApiStreamChunk（"text"、"reasoning"、"usage" 三种类型）
+	 * @param userContent Cline 的 API 对话中，"role"为"user"的 Anthropic 消息的"content"部分。它是一个对象数组，包括：文本、图片、工具调用、工具调用结果
+	 * @param includeFileDetails 是否包括当前工作目录下的文件列表。只在 while 的第一次循环，本函数的第一层递归 为 true
+	 * @returns 是否继续循环的 bool，用于终止父循环
+	 */
 	async recursivelyMakeClineRequests(
 		userContent: UserContent,
 		includeFileDetails: boolean = false,
@@ -3243,6 +3508,7 @@ export class Cline {
 			throw new Error("Cline instance aborted")
 		}
 
+		/** 处理 Cline 连续发生错误的情况（指思考失败？答复失败？没有采用工具调用？） */
 		if (this.consecutiveMistakeCount >= 3) {
 			if (this.autoApprovalSettings.enabled && this.autoApprovalSettings.enableNotifications) {
 				showSystemNotification({
@@ -3270,6 +3536,7 @@ export class Cline {
 			this.consecutiveMistakeCount = 0
 		}
 
+		/** 处理 Cline 在获得用户自动授权审批时，依然连续发生错误的情况（指思考失败？答复失败？没有采用工具调用？） */
 		if (
 			this.autoApprovalSettings.enabled &&
 			this.consecutiveAutoApprovedRequestsCount >= this.autoApprovalSettings.maxRequests
@@ -3289,16 +3556,20 @@ export class Cline {
 		}
 
 		// get previous api req's index to check token usage and determine if we need to truncate conversation history
+		/** 获取上一个 api_req_started 在 ClineMessage 数组中的索引，以检查 token 使用情况并确定是否需要截断对话历史记录 */
 		const previousApiReqIndex = findLastIndex(this.clineMessages, (m) => m.say === "api_req_started")
 
 		// Save checkpoint if this is the first API request
 		const isFirstRequest = this.clineMessages.filter((m) => m.say === "api_req_started").length === 0
+
 		if (isFirstRequest) {
 			await this.say("checkpoint_created") // no hash since we need to wait for CheckpointTracker to be initialized
 		}
 
 		// getting verbose details is an expensive operation, it uses globby to top-down build file structure of project which for large projects can take a few seconds
 		// for the best UX we show a placeholder api_req_started message with a loading spinner as this happens
+		// 【主线】将"role"为"user"的消息数组的 content 拼接成一个字符串，作为 api_req_started 这条 ClineMessage 的内容
+		// 这里的 API Request 还没有完成（要经过 loadContext 解析），所以这里是 Loading...，在前端可以看到
 		await this.say(
 			"api_req_started",
 			JSON.stringify({
@@ -3337,6 +3608,7 @@ export class Cline {
 		}
 
 		const [parsedUserContent, environmentDetails] = await this.loadContext(userContent, includeFileDetails)
+		console.log("userContent 和 environmentDetails 解析完毕", parsedUserContent)
 		userContent = parsedUserContent
 		// add environment details as its own text block, separate from tool results
 		userContent.push({ type: "text", text: environmentDetails })
@@ -3430,8 +3702,10 @@ export class Cline {
 
 			// reset streaming state
 			this.currentStreamingContentIndex = 0
+			// NOTE: Assistant Message 数组在流程中，第一次初始化
 			this.assistantMessageContent = []
 			this.didCompleteReadingStream = false
+			// NOTE: user Message Content 数组在流程中，第一次初始化
 			this.userMessageContent = []
 			this.userMessageContentReady = false
 			this.didRejectTool = false
@@ -3441,11 +3715,14 @@ export class Cline {
 			this.didAutomaticallyRetryFailedApiRequest = false
 			await this.diffViewProvider.reset()
 
+			// #region 处理 LLM response 的流式结果
 			const stream = this.attemptApiRequest(previousApiReqIndex) // yields only if the first chunk is successful, otherwise will allow the user to retry the request (most likely due to rate limit error, which gets thrown on the first chunk)
+			// assistantMessage 在递归中第一次初始化
 			let assistantMessage = ""
 			let reasoningMessage = ""
 			this.isStreaming = true
 			try {
+				// NOTE: ApiStreamChunk 形式（"text"、"reasoning"、"usage" 三种类型）由各自的 api/provider 实现返回
 				for await (const chunk of stream) {
 					if (!chunk) {
 						continue
@@ -3460,10 +3737,12 @@ export class Cline {
 							break
 						case "reasoning":
 							// reasoning will always come before assistant message
+							// NOTE: "reasoning" 信息永远在 "text" 消息之前，所以不需要检查
 							reasoningMessage += chunk.reasoning
 							await this.say("reasoning", reasoningMessage, undefined, true)
 							break
 						case "text":
+							// NOTE: 检查是否存在正在拼接的 "reasoning" 信息，如果存在，此时 chunk 的类型是 "text"，说明此时 "reasoning" 信息已经拼接完成
 							if (reasoningMessage && assistantMessage.length === 0) {
 								// complete reasoning message
 								await this.say("reasoning", reasoningMessage, undefined, false)
@@ -3471,7 +3750,10 @@ export class Cline {
 							assistantMessage += chunk.text
 							// parse raw assistant message into content blocks
 							const prevLength = this.assistantMessageContent.length
+							// NOTE: 从 chunk.text 中解析出 Assistant Message 的内容
 							this.assistantMessageContent = parseAssistantMessage(assistantMessage)
+							// NOTE: 如果是第一次解析（因为此前 Assistant Message 数组 为空，其长度肯定比解析后的少），或者之后解析的消息长度比之前的多
+							// FIXME: 暂时不知道为什么要 设置 userMessageContentReady
 							if (this.assistantMessageContent.length > prevLength) {
 								this.userMessageContentReady = false // new content we need to present, reset to false in case previous content set this to true
 							}
@@ -3505,6 +3787,7 @@ export class Cline {
 					}
 				}
 			} catch (error) {
+				// NOTE: abandoned 和 abort 的区别是，abandoned 是当扩展不再等待 cline 实例完成中止时发生的（当循环中的任何函数由于 this.abort 而抛出错误时，此处会抛出错误）
 				// abandoned happens when extension is no longer waiting for the cline instance to finish aborting (error is thrown here when any function in the for loop throws due to this.abort)
 				if (!this.abandoned) {
 					this.abortTask() // if the stream failed, there's various states the task could be in (i.e. could have streamed some tools the user may have executed), so we just resort to replicating a cancel task
@@ -3527,14 +3810,17 @@ export class Cline {
 			}
 
 			this.didCompleteReadingStream = true
+			// #endregion
 
 			// set any blocks to be complete to allow presentAssistantMessage to finish and set userMessageContentReady to true
 			// (could be a text block that had no subsequent tool uses, or a text block at the very end, or an invalid tool use, etc. whatever the case, presentAssistantMessage relies on these blocks either to be completed or the user to reject a block in order to proceed and eventually set userMessageContentReady to true)
+			// NOTE: 将所有“不完整”的块（即 AssistantMessage）为 “已完成” 状态（设置 partial 为 false），进而允许 presentAssistantMessage “完成”，并设置 userMessageContentReady 为 true
+			//（可以是 后面不挨着 tool_use 的文本块，或者是最后的文本块，或者是无效的 tool_use…… 无论哪种情况，presentAssistantMessage 都依赖于：这些块要么 “已完成”，要么用户已拒绝某个块，以便继续进行 并最终将 userMessageContentReady 设置为 true）
 			const partialBlocks = this.assistantMessageContent.filter((block) => block.partial)
 			partialBlocks.forEach((block) => {
 				block.partial = false
 			})
-			// this.assistantMessageContent.forEach((e) => (e.partial = false)) // cant just do this bc a tool could be in the middle of executing ()
+			// this.assistantMessageConten8t.forEach((e) => (e.partial = false)) // cant just do this bc a tool could be in the mid-dle of executing ()
 			if (partialBlocks.length > 0) {
 				this.presentAssistantMessage() // if there is content to update then it will complete and update this.userMessageContentReady to true, which we pwaitfor before making the next request. all this is really doing is presenting the last partial message that we just set to complete
 			}
@@ -3546,6 +3832,10 @@ export class Cline {
 			// now add to apiconversationhistory
 			// need to save assistant responses to file before proceeding to tool use since user can exit at any moment and we wouldn't be able to save the assistant's response
 			let didEndLoop = false
+			// NOTE: assistantMessage 字符串是 原始的 LLM response 加上了 3 种说明之一（this.abort、this.didRejectTool、this.didAlreadyUseTool）
+			// - 在之前处理 LLM response 的流式结果时，this.abort 为 true，则利用 abortStream 中加入对话历史
+			// - 否则，在下面 将其加入对话历史
+
 			if (assistantMessage.length > 0) {
 				telemetryService.captureConversationTurnEvent(this.taskId, this.apiProvider, this.api.getModel().id, "assistant")
 
@@ -3565,6 +3855,7 @@ export class Cline {
 				await pWaitFor(() => this.userMessageContentReady)
 
 				// if the model did not tool use, then we need to tell it to either use a tool or attempt_completion
+				// NOTE: 如果模型没有进行 tool use。我们需要告知它要么进行，要么使用特殊的 tool use "attempt_completion"
 				const didToolUse = this.assistantMessageContent.some((block) => block.type === "tool_use")
 
 				if (!didToolUse) {
@@ -3602,10 +3893,24 @@ export class Cline {
 		}
 	}
 
+
+	/**
+	 * 【主线】识别 "role"为"user"的 Anthropic 消息的"content"部分中 mentions（@），并解析它们。
+	 * 返回：
+	 * 1. 解析后的 userContent（用于构建 "role"为"user"的 Anthropic 消息）
+	 * 2. 当前开发环境信息（字符串）
+	 * 【mentions】Cline 中的 mentions 被定义为以 "@" 开头的字符串，代表 Cline 提供的辅助功能，如：解析 URL、提供文件路径等
+	 * @param userContent Cline 的 API 对话中，"role"为"user"的 Anthropic 消息的"content"部分。 它是一个对象数组，包括：文本、图片、工具调用、工具调用结果
+	 * @param includeFileDetails 是否包括当前工作目录下的文件列表。
+	 * @returns 返回一个 Promise，包含两个元素的数组：1. 解析后的 userContent；2. 当前开发环境信息（字符串）
+	 */
 	async loadContext(userContent: UserContent, includeFileDetails: boolean = false) {
 		return await Promise.all([
 			// This is a temporary solution to dynamically load context mentions from tool results. It checks for the presence of tags that indicate that the tool was rejected and feedback was provided (see formatToolDeniedFeedback, attemptCompletion, executeCommand, and consecutiveMistakeCount >= 3) or "<answer>" (see askFollowupQuestion), we place all user generated content in these tags so they can effectively be used as markers for when we should parse mentions). However if we allow multiple tools responses in the future, we will need to parse mentions specifically within the user content tags.
 			// (Note: this caused the @/ import alias bug where file contents were being parsed as well, since v2 converted tool results to text blocks)
+
+			// 简单来说，因为在别的地方（具体函数见英文注释）会把 1.用户拒绝工具调用并提供反馈 或者 2.回答 cline 的 followup question 的内容 放在标签内，这样就会有四种标签 表示用户输入了内容。
+			// 这个函数就是要解析这些标签内的潜在的 @mentions
 			Promise.all(
 				userContent.map(async (block) => {
 					if (block.type === "text") {
@@ -3619,7 +3924,7 @@ export class Cline {
 						) {
 							return {
 								...block,
-								text: await parseMentions(block.text, cwd, this.urlContentFetcher),
+								text: await parseMentions(block.text, cwd, this.urlContentFetcher, this),
 							}
 						}
 					}
@@ -3630,22 +3935,38 @@ export class Cline {
 		])
 	}
 
+
+	/**
+	 * 【主线】收集、生成当前开发环境的详细信息，并返回。这个函数返回的文本用于 LLM API 对话
+	 * 1. 获取当前可见的编辑器（即用户正在查看的文件）过滤掉不需要的路径。然后将路径转换为 POSIX 风格
+	 * 2. 获取所有的标签页（包括所有分组的标签），然后提取每个标签的文件路径。过滤掉不需要的路径。然后将路径转换为 POSIX 风格
+	 * 3. 如果有正在运行的终端，等待他们操作完成，遍历这些终端并获取它们的输出
+	 * 4. 如果有空闲终端，获取它们的输出
+	 * 5. 获取当前时间并格式化
+	 * 6. 如果 includeFileDetails 为 true，则获取当前工作目录下的文件列表。
+	 * 7. 根据 "plan" 模式或 "act" 模式 增加对应的补充提示信息
+	 * @param includeFileDetails 是否包括当前工作目录下的文件列表。
+	 * @returns 被 `<environment_details>` 包裹的格式化字符串
+	 */
 	async getEnvironmentDetails(includeFileDetails: boolean = false) {
 		let details = ""
 
 		// It could be useful for cline to know if the user went from one or no file to another between messages, so we always include this context
 		details += "\n\n# VSCode Visible Files"
+		// 获取当前可见的编辑器（即用户正在查看的文件），并将每个文件的绝对路径转换为相对路径。
 		const visibleFilePaths = vscode.window.visibleTextEditors
 			?.map((editor) => editor.document?.uri?.fsPath)
 			.filter(Boolean)
 			.map((absolutePath) => path.relative(cwd, absolutePath))
 
 		// Filter paths through clineIgnoreController
+		// 过滤掉不需要的路径。然后将路径转换为 POSIX 风格，并将所有路径按行连接成一个字符串
 		const allowedVisibleFiles = this.clineIgnoreController
 			.filterPaths(visibleFilePaths)
 			.map((p) => p.toPosix())
 			.join("\n")
 
+		// 如果有可见文件，添加到 details 中；否则，输出 “(No visible files)”。这样，cline 就可以知道用户在查看哪些文件。
 		if (allowedVisibleFiles) {
 			details += `\n${allowedVisibleFiles}`
 		} else {
@@ -3653,6 +3974,7 @@ export class Cline {
 		}
 
 		details += "\n\n# VSCode Open Tabs"
+		// 获取所有的标签页（包括所有分组的标签），然后提取每个标签的文件路径。
 		const openTabPaths = vscode.window.tabGroups.all
 			.flatMap((group) => group.tabs)
 			.map((tab) => (tab.input as vscode.TabInputText)?.uri?.fsPath)
@@ -3671,16 +3993,18 @@ export class Cline {
 			details += "\n(No open tabs)"
 		}
 
+		// getTerminals(true) 获取正在运行的终端（忙碌的终端），getTerminals(false) 获取空闲的终端。
 		const busyTerminals = this.terminalManager.getTerminals(true)
 		const inactiveTerminals = this.terminalManager.getTerminals(false)
 		// const allTerminals = [...busyTerminals, ...inactiveTerminals]
 
+		// 如果有忙碌的终端并且文件已编辑，则延迟 300 毫秒以确保文件已保存，给终端一些时间来处理相关操作。
 		if (busyTerminals.length > 0 && this.didEditFile) {
-			//  || this.didEditFile
 			await delay(300) // delay after saving file to let terminals catch up
 		}
 
 		// let terminalWasBusy = false
+		// 如果有忙碌的终端，等待直到它们的进程不再繁忙。使用 pWaitFor 轮询每个终端的状态，最多等待 15 秒。
 		if (busyTerminals.length > 0) {
 			// wait for terminals to cool down
 			// terminalWasBusy = allTerminals.some((t) => this.terminalManager.isProcessHot(t.id))
@@ -3710,6 +4034,7 @@ export class Cline {
 		this.didEditFile = false // reset, this lets us know when to wait for saved files to update terminals
 
 		// waiting for updated diagnostics lets terminal output be the most up-to-date possible
+		// 如果有正在运行的终端，遍历这些终端并获取它们的输出（如果有的话），并将它们添加到 terminalDetails 中
 		let terminalDetails = ""
 		if (busyTerminals.length > 0) {
 			// terminals are cool, let's retrieve their output
@@ -3725,6 +4050,7 @@ export class Cline {
 			}
 		}
 		// only show inactive terminals if there's output to show
+		// 如果有空闲终端，获取它们的输出并添加到 terminalDetails 中。
 		if (inactiveTerminals.length > 0) {
 			const inactiveTerminalOutputs = new Map<number, string>()
 			for (const inactiveTerminal of inactiveTerminals) {
@@ -3757,6 +4083,7 @@ export class Cline {
 		}
 
 		// Add current time information with timezone
+		// 获取当前时间并使用 Intl.DateTimeFormat 格式化时间，包含年、月、日、小时、分钟和秒。还会附带时区信息，展示当前的时区偏移。
 		const now = new Date()
 		const formatter = new Intl.DateTimeFormat(undefined, {
 			year: "numeric",
@@ -3772,6 +4099,9 @@ export class Cline {
 		const timeZoneOffsetStr = `${timeZoneOffset >= 0 ? "+" : ""}${timeZoneOffset}:00`
 		details += `\n\n# Current Time\n${formatter.format(now)} (${timeZone}, UTC${timeZoneOffsetStr})`
 
+		// 如果 includeFileDetails 为 true，则获取当前工作目录下的文件列表。
+		// 若工作目录是桌面，则不直接展示桌面文件，提示用户使用 "list_files" 这个工具调用（tool_use）来查看。
+		// 否则，用 `listFiles()` 函数列出最多 200 个文件
 		if (includeFileDetails) {
 			details += `\n\n# Current Working Directory (${cwd.toPosix()}) Files\n`
 			const isDesktop = arePathsEqual(cwd, path.join(os.homedir(), "Desktop"))
@@ -3786,6 +4116,9 @@ export class Cline {
 		}
 
 		details += "\n\n# Current Mode"
+		// 根据 chatSettings.mode 的值，决定是否处于 "plan" 模式或 "act" 模式。
+		// 如果是 "plan" 模式，则输出相关的模式说明，提醒用户在此模式下主要是信息收集和方案设计。
+		// 如果是 "act" 模式，输出相应的状态。
 		if (this.chatSettings.mode === "plan") {
 			details += "\nPLAN MODE"
 			details +=

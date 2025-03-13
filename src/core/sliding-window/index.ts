@@ -51,7 +51,12 @@ deletedRange = getNextTruncationRange(messages, deletedRange); // [2,3] (assista
 truncated = getTruncatedMessages(messages, deletedRange);
 // [user1, assistant3]
 */
-
+/**
+ * 【主线】根据已经删除的消息范围，计算当前需要删除的消息范围
+ * 1. 始终保留第一条信息（通常是任务信息，唯一包含 <task> 标签的地方）
+ * 2. 删除剩余信息的 1/2 或 3/4，且删除的是 比较老 的对话消息
+ * 3. 保证删除的最后一条信息 "role" 为 user，以保持 Anthropic 所要求的 user-assistant-user-assistant 结构
+ */
 export function getNextTruncationRange(
 	messages: Anthropic.Messages.MessageParam[],
 	currentDeletedRange: [number, number] | undefined = undefined,
@@ -69,7 +74,6 @@ export function getNextTruncationRange(
 		// Remove 3/4 of user-assistant pairs
 		messagesToRemove = Math.floor((messages.length - startOfRest) / 8) * 3 * 2
 	}
-
 	let rangeEndIndex = startOfRest + messagesToRemove - 1
 
 	// Make sure the last message being removed is a user message, so that the next message after the initial task message is an assistant message. This preservers the user-assistant-user-assistant structure.
@@ -82,6 +86,7 @@ export function getNextTruncationRange(
 	return [rangeStartIndex, rangeEndIndex]
 }
 
+/** 根据删除范围构造截断后的消息数组 */
 export function getTruncatedMessages(
 	messages: Anthropic.Messages.MessageParam[],
 	deletedRange: [number, number] | undefined,
