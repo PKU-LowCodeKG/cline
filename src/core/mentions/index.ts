@@ -62,14 +62,13 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 
 		// 如果提及内容是一个 URL（插件前端 @URL）
 		if (mention.startsWith("http")) {
-			// 将其替换为特定格式的文本，提示用户可以查看下方的网站内容
 			return `'${mention}' (see below for site content)`
 		}
 		// 如果提及内容以 "/" 开头（插件前端 @Folder 或者 @File）
 		else if (mention.startsWith("/")) {
 			// 去除路径前面的斜杠
 			const mentionPath = mention.slice(1)
-			// 判断路径是否以斜杠结尾，如果是则表示是文件夹，否则表示是文件
+			// 判断路径是否以斜杠结尾，区分是 文件夹 还是 文件
 			return mentionPath.endsWith("/")
 				? `'${mentionPath}' (see below for folder content)`
 				: `'${mentionPath}' (see below for file content)`
@@ -385,16 +384,20 @@ const handleRepoSearchAgent = async (req: string, _cline: Cline) => {
 									break
 								case 'evaluation_progress':
 									await _cline.say("checkpoint_created")
+
 									const { index, total, current }: { index: number, total: number, current: RepoInfo} = data;
 									url += current.html_url + "\n\n"
+
 									await _cline.say("text", `第${index}个仓库的评估结果是\n\n${buildRepoInfoString(current)}`)
-									if (data.index !== 3) {
+									if (index !== 3) {
 										await _cline.say("text", `正在评估仓库 (${index + 1}/${total})...`)
 									}
 									break
 								case 'final_result':
 									await _cline.say("checkpoint_created")
+
 									repositories = data;
+
 									await _cline.say("text", `评估完成！`)
 									break
 							}

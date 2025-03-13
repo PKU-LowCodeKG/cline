@@ -51,14 +51,18 @@ deletedRange = getNextTruncationRange(messages, deletedRange); // [2,3] (assista
 truncated = getTruncatedMessages(messages, deletedRange);
 // [user1, assistant3]
 */
-/** 计算需要删除的消息范围 始终保留第一条信息*/
+/**
+ * 【主线】根据已经删除的消息范围，计算当前需要删除的消息范围
+ * 1. 始终保留第一条信息（通常是任务信息，唯一包含 <task> 标签的地方）
+ * 2. 删除剩余信息的 1/2 或 3/4，且删除的是 比较老 的对话消息
+ * 3. 保证删除的最后一条信息 "role" 为 user，以保持 Anthropic 所要求的 user-assistant-user-assistant 结构
+ */
 export function getNextTruncationRange(
 	messages: Anthropic.Messages.MessageParam[],
 	currentDeletedRange: [number, number] | undefined = undefined,
 	keep: "half" | "quarter" = "half",
 ): [number, number] {
 	// Since we always keep the first message, currentDeletedRange[0] will always be 1 (for now until we have a smarter truncation algorithm)
-	//第一条信息通常是任务信息，所以需要保留
 	const rangeStartIndex = 1
 	const startOfRest = currentDeletedRange ? currentDeletedRange[1] + 1 : 1
 
@@ -70,12 +74,10 @@ export function getNextTruncationRange(
 		// Remove 3/4 of user-assistant pairs
 		messagesToRemove = Math.floor((messages.length - startOfRest) / 8) * 3 * 2
 	}
-	// 得到最后一个需要删除的信息
 	let rangeEndIndex = startOfRest + messagesToRemove - 1
 
 	// Make sure the last message being removed is a user message, so that the next message after the initial task message is an assistant message. This preservers the user-assistant-user-assistant structure.
 	// NOTE: anthropic format messages are always user-assistant-user-assistant, while openai format messages can have multiple user messages in a row (we use anthropic format throughout cline)
-	// 确保删除的最后一条信息为 user 保持Anthropic的格式
 	if (messages[rangeEndIndex].role !== "user") {
 		rangeEndIndex -= 1
 	}

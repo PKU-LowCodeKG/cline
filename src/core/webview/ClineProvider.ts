@@ -178,7 +178,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		// 使用 outputChannel 来输出调试信息
 		private readonly outputChannel: vscode.OutputChannel,
 	) {
-		// 当ClineProvider实例被创建时，向输出通道追加一条消息
 		this.outputChannel.appendLine("ClineProvider instantiated")
 		// 将当前实例添加到活跃实例的集合中，以便于管理和追踪
 		ClineProvider.activeInstances.add(this)
@@ -724,7 +723,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 							this.exportTaskWithId(currentTaskId)
 						}
 						break
-					// 【主线】根据任务id 显示历史任务
 					case "showTaskWithId":
 						this.showTaskWithId(message.text!)
 						break
@@ -1201,7 +1199,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 					this.cline === undefined ||
 					this.cline.isStreaming === false ||
 					this.cline.didFinishAbortingStream ||
-					this.cline.isWaitingForFirstChunk, // 如果只处理了第一个数据块，则无需等待优雅中止// if only first chunk is processed, then there's no need to wait for graceful abort (closes edits, browser, etc)
+					this.cline.isWaitingForFirstChunk, // if only first chunk is processed, then there's no need to wait for graceful abort (closes edits, browser, etc)
 				{
 					timeout: 3_000,
 				},
@@ -1209,7 +1207,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 				console.error("Failed to abort task")
 			})
 
-			// 如果任务实例仍然存在，标记为已放弃，以防止影响后续任务实例的GUI
+			// 如果 Cline 实例仍然存在，将该实例标记为 已废弃，以防止影响后续 Cline 实例的 GUI
 			if (this.cline) {
 				// 'abandoned' will prevent this cline instance from affecting future cline instance gui. this may happen if its hanging on a streaming request
 				this.cline.abandoned = true
