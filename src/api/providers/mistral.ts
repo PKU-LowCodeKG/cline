@@ -17,7 +17,7 @@ import { ApiStream } from "../transform/stream"
 
 
 import { Message } from "ollama"
-import { logMessages, logStreamOutput } from "../../core/prompts/show_prompt"
+import { logMessages } from "../../core/prompts/show_prompt"
 
 export class MistralHandler implements ApiHandler {
 	private options: ApiHandlerOptions
@@ -44,12 +44,6 @@ export class MistralHandler implements ApiHandler {
 		]
 		logMessages(ollamaMessages)
 
-		// Create array to collect chunks for logging
-		const chunks: Array<{ type: "text", text: string }> = []
-		let usage = {
-			inputTokens: 0,
-			outputTokens: 0
-		}
 
 		const stream = await this.client.chat.stream({
 			model: this.getModel().id,
@@ -68,40 +62,20 @@ export class MistralHandler implements ApiHandler {
 				} else if (Array.isArray(delta.content)) {
 					content = delta.content.map((c) => (c.type === "text" ? c.text : "")).join("")
 				}
-				const textChunk = {
-					type: "text" as const,
-					text: content
+				yield {
+					type: "text",
+					text: content,
 				}
-				chunks.push(textChunk)
-				yield textChunk
 			}
 
 			if (chunk.data.usage) {
-				usage = {
-					inputTokens: chunk.data.usage.promptTokens || 0,
-					outputTokens: chunk.data.usage.completionTokens || 0
-				}
 				yield {
 					type: "usage",
-					...usage
+					inputTokens: chunk.data.usage.promptTokens || 0,
+					outputTokens: chunk.data.usage.completionTokens || 0,
 				}
 			}
 		}
-
-		// Log complete output including usage information
-		await logStreamOutput({
-			async *[Symbol.asyncIterator]() {
-				// First yield all text chunks
-				for (const chunk of chunks) {
-					yield chunk
-				}
-				// Then yield usage information as a text chunk
-				yield {
-					type: "text",
-					text: `\nUsage Metrics:\nInput Tokens: ${usage.inputTokens}\nOutput Tokens: ${usage.outputTokens}`
-				}
-			}
-		} as ApiStream)
 	}
 
 	getModel(): { id: MistralModelId; info: ModelInfo } {

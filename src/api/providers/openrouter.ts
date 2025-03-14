@@ -12,7 +12,7 @@ import { OpenRouterErrorResponse } from "./types"
 
 
 import { Message } from "ollama"
-import { logMessages, logStreamOutput } from "../../core/prompts/show_prompt"
+import { logMessages } from "../../core/prompts/show_prompt"
 
 export class OpenRouterHandler implements ApiHandler {
   private options: ApiHandlerOptions
@@ -32,8 +32,6 @@ export class OpenRouterHandler implements ApiHandler {
 
   @withRetry()
   async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
-    const model = this.getModel()
-
     // Convert messages to Ollama format for logging
     const ollamaMessages: Message[] = [
       { role: "system", content: systemPrompt },
@@ -46,69 +44,37 @@ export class OpenRouterHandler implements ApiHandler {
     ]
     logMessages(ollamaMessages)
 
-    // Create array to collect chunks for logging
-    const chunks: Array<{ type: "text" | "reasoning", text?: string, reasoning?: string }> = []
 
-    // Create generator to collect chunks
-    const genId = yield* (async function* (this: OpenRouterHandler) {
-      const self = this
-      for await (const chunk of streamOpenRouterFormatRequest(
-        self.client,
-        systemPrompt,
-        messages,
-        model,
-        self.options.o3MiniReasoningEffort,
-        self.options.thinkingBudgetTokens
-      )) {
-        // Store chunk for logging
-        if (chunk.type === "text" || chunk.type === "reasoning") {
-          chunks.push(chunk)
-        }
-        yield chunk
-      }
-    }).bind(this)()
+		const model = this.getModel()
+		const genId = yield* streamOpenRouterFormatRequest(
+			this.client,
+			systemPrompt,
+			messages,
+			model,
+			this.options.o3MiniReasoningEffort,
+			this.options.thinkingBudgetTokens,
+		)
 
-    let usage = {
-      inputTokens: 0,
-      outputTokens: 0,
-      totalCost: 0
-    }
-
-    if (typeof genId === "string") {
-      await delay(500) // FIXME: necessary delay to ensure generation endpoint is ready
-      try {
-        const generationIterator = this.fetchGenerationDetails(genId)
-        const generation = (await generationIterator.next()).value
-        // console.log("OpenRouter generation details:", generation)
-        usage = {
-          inputTokens: generation?.native_tokens_prompt || 0,
-          outputTokens: generation?.native_tokens_completion || 0,
-          totalCost: generation?.total_cost || 0
-        }
-        yield {
-          type: "usage",
-          ...usage
-        }
-
-        // Log complete output
-        await logStreamOutput({
-          async *[Symbol.asyncIterator]() {
-            // First yield all text/reasoning chunks
-            for (const chunk of chunks) {
-              yield chunk
-            }
-            // Then yield usage information as a text chunk
-            yield {
-              type: "text",
-              text: `\nUsage Metrics:\nInput Tokens: ${usage.inputTokens}\nOutput Tokens: ${usage.outputTokens}\nTotal Cost: ${usage.totalCost}`
-            }
-          }
-        } as ApiStream)
-      } catch (error) {
-        // ignore if fails
-        console.error("Error fetching OpenRouter generation details:", error)
-      }
-    }
+		if (genId) {
+			await delay(500) // FIXME: necessary delay to ensure generation endpoint is ready
+			try {
+				const generationIterator = this.fetchGenerationDetails(genId)
+				const generation = (await generationIterator.next()).value
+				// console.log("OpenRouter generation details:", generation)
+				yield {
+					type: "usage",
+					// cacheWriteTokens: 0,
+					// cacheReadTokens: 0,
+					// openrouter generation endpoint fails often
+					inputTokens: generation?.native_tokens_prompt || 0,
+					outputTokens: generation?.native_tokens_completion || 0,
+					totalCost: generation?.total_cost || 0,
+				}
+			} catch (error) {
+				// ignore if fails
+				console.error("Error fetching OpenRouter generation details:", error)
+			}
+		}
   }
 
   @withRetry({ maxRetries: 4, baseDelay: 250, maxDelay: 1000, retryAllErrors: true })

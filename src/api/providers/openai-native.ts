@@ -16,7 +16,7 @@ import { ChatCompletionReasoningEffort } from "openai/resources/chat/completions
 
 
 import { Message } from "ollama"
-import { logMessages, logStreamOutput } from "../../core/prompts/show_prompt"
+import { logMessages } from "../../core/prompts/show_prompt"
 
 export class OpenAiNativeHandler implements ApiHandler {
 	private options: ApiHandlerOptions
@@ -59,15 +59,6 @@ export class OpenAiNativeHandler implements ApiHandler {
 		]
 		logMessages(ollamaMessages)
 
-		// Create array to collect chunks for logging
-		const chunks: Array<{ type: "text", text: string }> = []
-		let usage = {
-			inputTokens: 0,
-			outputTokens: 0,
-			cacheWriteTokens: 0,
-			cacheReadTokens: 0,
-			totalCost: 0
-		}
 
 		const model = this.getModel()
 
@@ -80,49 +71,16 @@ export class OpenAiNativeHandler implements ApiHandler {
 					model: model.id,
 					messages: [{ role: "user", content: systemPrompt }, ...convertToOpenAiMessages(messages)],
 				})
-				const textChunk = {
-					type: "text" as const,
-					text: response.choices[0]?.message.content || ""
+				yield {
+					type: "text",
+					text: response.choices[0]?.message.content || "",
 				}
-				chunks.push(textChunk)
-				yield textChunk
 
-				// Collect usage information
-				const usageInfo = await this.yieldUsage(model.info, response.usage).next()
-				if (usageInfo.value && usageInfo.value.type === "usage") {
-					usage = {
-						inputTokens: usageInfo.value.inputTokens,
-						outputTokens: usageInfo.value.outputTokens,
-						cacheWriteTokens: usageInfo.value.cacheWriteTokens || 0,
-						cacheReadTokens: usageInfo.value.cacheReadTokens || 0,
-						totalCost: usageInfo.value.totalCost || 0
-					}
-				}
-				yield usageInfo.value
-
-				// Log complete output
-				await logStreamOutput({
-					async *[Symbol.asyncIterator]() {
-						yield textChunk
-						yield {
-							type: "text",
-							text: `\nUsage Metrics:\nInput Tokens: ${usage.inputTokens}\nOutput Tokens: ${usage.outputTokens}\nCache Read Tokens: ${usage.cacheReadTokens}\nCache Write Tokens: ${usage.cacheWriteTokens}\nTotal Cost: ${usage.totalCost}`
-						}
-					}
-				} as ApiStream)
+				yield* this.yieldUsage(model.info, response.usage)
 
 				break
 			}
 			case "o3-mini": {
-				// Reset usage for new stream
-				usage = {
-					inputTokens: 0,
-					outputTokens: 0,
-					cacheWriteTokens: 0,
-					cacheReadTokens: 0,
-					totalCost: 0
-				}
-
 				const stream = await this.client.chat.completions.create({
 					model: model.id,
 					messages: [{ role: "developer", content: systemPrompt }, ...convertToOpenAiMessages(messages)],
@@ -133,54 +91,19 @@ export class OpenAiNativeHandler implements ApiHandler {
 				for await (const chunk of stream) {
 					const delta = chunk.choices[0]?.delta
 					if (delta?.content) {
-						const textChunk = {
-							type: "text" as const,
-							text: delta.content
+						yield {
+							type: "text",
+							text: delta.content,
 						}
-						chunks.push(textChunk)
-						yield textChunk
 					}
 					if (chunk.usage) {
 						// Only last chunk contains usage
-						const usageInfo = await this.yieldUsage(model.info, chunk.usage).next()
-						if (usageInfo.value && usageInfo.value.type === "usage") {
-							usage = {
-								inputTokens: usageInfo.value.inputTokens,
-								outputTokens: usageInfo.value.outputTokens,
-								cacheWriteTokens: usageInfo.value.cacheWriteTokens || 0,
-								cacheReadTokens: usageInfo.value.cacheReadTokens || 0,
-								totalCost: usageInfo.value.totalCost || 0
-							}
-						}
-						yield usageInfo.value
+						yield* this.yieldUsage(model.info, chunk.usage)
 					}
 				}
-
-				// Log complete output
-				await logStreamOutput({
-					async *[Symbol.asyncIterator]() {
-						for (const chunk of chunks) {
-							yield chunk
-						}
-						yield {
-							type: "text",
-							text: `\nUsage Metrics:\nInput Tokens: ${usage.inputTokens}\nOutput Tokens: ${usage.outputTokens}\nCache Read Tokens: ${usage.cacheReadTokens}\nCache Write Tokens: ${usage.cacheWriteTokens}\nTotal Cost: ${usage.totalCost}`
-						}
-					}
-				} as ApiStream)
-
 				break
 			}
 			default: {
-				// Reset usage for new stream
-				usage = {
-					inputTokens: 0,
-					outputTokens: 0,
-					cacheWriteTokens: 0,
-					cacheReadTokens: 0,
-					totalCost: 0
-				}
-
 				const stream = await this.client.chat.completions.create({
 					model: model.id,
 					// max_completion_tokens: this.getModel().info.maxTokens,
@@ -193,41 +116,16 @@ export class OpenAiNativeHandler implements ApiHandler {
 				for await (const chunk of stream) {
 					const delta = chunk.choices[0]?.delta
 					if (delta?.content) {
-						const textChunk = {
-							type: "text" as const,
-							text: delta.content
+						yield {
+							type: "text",
+							text: delta.content,
 						}
-						chunks.push(textChunk)
-						yield textChunk
 					}
 					if (chunk.usage) {
 						// Only last chunk contains usage
-						const usageInfo = await this.yieldUsage(model.info, chunk.usage).next()
-						if (usageInfo.value && usageInfo.value.type === "usage") {
-							usage = {
-								inputTokens: usageInfo.value.inputTokens,
-								outputTokens: usageInfo.value.outputTokens,
-								cacheWriteTokens: usageInfo.value.cacheWriteTokens || 0,
-								cacheReadTokens: usageInfo.value.cacheReadTokens || 0,
-								totalCost: usageInfo.value.totalCost || 0
-							}
-						}
-						yield usageInfo.value
+						yield* this.yieldUsage(model.info, chunk.usage)
 					}
 				}
-
-				// Log complete output
-				await logStreamOutput({
-					async *[Symbol.asyncIterator]() {
-						for (const chunk of chunks) {
-							yield chunk
-						}
-						yield {
-							type: "text",
-							text: `\nUsage Metrics:\nInput Tokens: ${usage.inputTokens}\nOutput Tokens: ${usage.outputTokens}\nCache Read Tokens: ${usage.cacheReadTokens}\nCache Write Tokens: ${usage.cacheWriteTokens}\nTotal Cost: ${usage.totalCost}`
-						}
-					}
-				} as ApiStream)
 			}
 		}
 	}

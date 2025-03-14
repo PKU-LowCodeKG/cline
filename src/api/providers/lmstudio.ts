@@ -7,7 +7,7 @@ import { ApiStream } from "../transform/stream"
 
 
 import { Message } from "ollama"
-import { logMessages, logStreamOutput } from "../../core/prompts/show_prompt"
+import { logMessages } from "../../core/prompts/show_prompt"
 
 export class LmStudioHandler implements ApiHandler {
 	private options: ApiHandlerOptions
@@ -34,8 +34,6 @@ export class LmStudioHandler implements ApiHandler {
 		]
 		logMessages(ollamaMessages)
 
-		// Create array to collect chunks for logging
-		const chunks: Array<{ type: "text", text: string }> = []
 
 		const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
 			{ role: "system", content: systemPrompt },
@@ -52,23 +50,12 @@ export class LmStudioHandler implements ApiHandler {
 			for await (const chunk of stream) {
 				const delta = chunk.choices[0]?.delta
 				if (delta?.content) {
-					const textChunk = {
-						type: "text" as const,
-						text: delta.content
+					yield {
+						type: "text",
+						text: delta.content,
 					}
-					chunks.push(textChunk)
-					yield textChunk
 				}
 			}
-
-			// Log complete output
-			await logStreamOutput({
-				async *[Symbol.asyncIterator]() {
-					for (const chunk of chunks) {
-						yield chunk
-					}
-				}
-			} as ApiStream)
 		} catch (error) {
 			// LM Studio doesn't return an error code/body for now
 			throw new Error(

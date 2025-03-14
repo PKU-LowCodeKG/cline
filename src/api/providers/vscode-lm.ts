@@ -428,7 +428,6 @@ export class VsCodeLmHandler implements ApiHandler, SingleCompletionHandler {
 			...convertToVsCodeLmMessages(cleanedMessages),
 		]
 
-
 		// Initialize cancellation token for the request
 		this.currentRequestCancellation = new vscode.CancellationTokenSource()
 

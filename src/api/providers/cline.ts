@@ -8,7 +8,7 @@ import axios from "axios"
 
 
 import { Message } from "ollama"
-import { logMessages, logStreamOutput } from "../../core/prompts/show_prompt"
+import { logMessages } from "../../core/prompts/show_prompt"
 
 export class ClineHandler implements ApiHandler {
 	private options: ApiHandlerOptions
@@ -23,8 +23,6 @@ export class ClineHandler implements ApiHandler {
 	}
 
 	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
-		const model = this.getModel()
-
 		// Convert messages to Ollama format for logging
 		const ollamaMessages: Message[] = [
 			{ role: "system", content: systemPrompt },
@@ -37,26 +35,17 @@ export class ClineHandler implements ApiHandler {
 		]
 		logMessages(ollamaMessages)
 
-		// Create array to collect chunks for logging
-		const chunks: Array<{ type: "text" | "reasoning", text?: string, reasoning?: string }> = []
 
-		// Collect chunks while yielding them
-		const genId = yield* (async function* (this: ClineHandler) {
-			for await (const chunk of streamOpenRouterFormatRequest(
-				this.client,
-				systemPrompt,
-				messages,
-				model,
-				this.options.o3MiniReasoningEffort,
-				this.options.thinkingBudgetTokens
-			)) {
-				// Store chunk for logging
-				if (chunk.type === "text" || chunk.type === "reasoning") {
-					chunks.push(chunk)
-				}
-				yield chunk
-			}
-		}).bind(this)()
+		const model = this.getModel()
+
+		const genId = yield* streamOpenRouterFormatRequest(
+			this.client,
+			systemPrompt,
+			messages,
+			model,
+			this.options.o3MiniReasoningEffort,
+			this.options.thinkingBudgetTokens,
+		)
 
 		try {
 			const response = await axios.get(`https://api.cline.bot/v1/generation?id=${genId}`, {
@@ -68,21 +57,6 @@ export class ClineHandler implements ApiHandler {
 
 			const generation = response.data
 			console.log("cline generation details:", generation)
-
-			// Log complete output including all collected chunks
-			await logStreamOutput({
-				async *[Symbol.asyncIterator]() {
-					// First yield all text/reasoning chunks
-					for (const chunk of chunks) {
-						yield chunk
-					}
-					// Then yield generation details as a final chunk
-					yield {
-						type: "text",
-						text: `\nGeneration Details:\nInput Tokens: ${generation?.native_tokens_prompt || 0}\nOutput Tokens: ${generation?.native_tokens_completion || 0}\nTotal Cost: ${generation?.total_cost || 0}`
-					}
-				}
-			} as ApiStream)
 			yield {
 				type: "usage",
 				inputTokens: generation?.native_tokens_prompt || 0,

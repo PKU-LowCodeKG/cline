@@ -232,15 +232,11 @@ export function logMessages(messages: Message[]) {
     }
 }
 
-export async function logStreamOutput(stream: ApiStream) {
-    let outputBuffer = ""
-
-    for await (const chunk of stream) {
-        if (chunk.type === "text") {
-            outputBuffer += chunk.text
-        }
-    }
-
+/**
+ * Cline 在 recursivelyMakeClineRequests 中已经维护了 chunk.type 为 text 的 LLM 输出。直接把对应的字符串输出即可
+ * @param outputBuffer 
+ */
+export function logOutput(outputBuffer: string = "") {
     // Read existing content
     const existingContent = fs.readFileSync(currentLogFile, 'utf8')
     
@@ -261,6 +257,4 @@ export async function logStreamOutput(stream: ApiStream) {
         )
     
     fs.writeFileSync(currentLogFile, updatedContent)
-
-    return stream
 }

@@ -8,7 +8,7 @@ import { ApiStream } from "../transform/stream"
 
 
 import { Message } from "ollama"
-import { logMessages, logStreamOutput } from "../../core/prompts/show_prompt"
+import { logMessages } from "../../core/prompts/show_prompt"
 
 export class RequestyHandler implements ApiHandler {
 	private options: ApiHandlerOptions
@@ -40,15 +40,6 @@ export class RequestyHandler implements ApiHandler {
 		]
 		logMessages(ollamaMessages)
 
-		// Create array to collect chunks for logging
-		const chunks: Array<{ type: "text" | "reasoning", text?: string, reasoning?: string }> = []
-		let usage = {
-			inputTokens: 0,
-			outputTokens: 0,
-			cacheReadTokens: 0,
-			cacheWriteTokens: 0,
-			totalCost: 0
-		}
 
 		const modelId = this.options.requestyModelId ?? ""
 
@@ -70,21 +61,17 @@ export class RequestyHandler implements ApiHandler {
 		for await (const chunk of stream) {
 			const delta = chunk.choices[0]?.delta
 			if (delta?.content) {
-				const textChunk = {
-					type: "text" as const,
-					text: delta.content
+				yield {
+					type: "text",
+					text: delta.content,
 				}
-				chunks.push(textChunk)
-				yield textChunk
 			}
 
 			if (delta && "reasoning_content" in delta && delta.reasoning_content) {
-				const reasoningChunk = {
-					type: "reasoning" as const,
-					reasoning: (delta.reasoning_content as string | undefined) || ""
+				yield {
+					type: "reasoning",
+					reasoning: (delta.reasoning_content as string | undefined) || "",
 				}
-				chunks.push(reasoningChunk)
-				yield reasoningChunk
 			}
 
 			// Requesty usage includes an extra field for Anthropic use cases.
@@ -98,37 +85,23 @@ export class RequestyHandler implements ApiHandler {
 			}
 
 			if (chunk.usage) {
-				const requestyUsage = chunk.usage as RequestyUsage
-				usage = {
-					inputTokens: requestyUsage.prompt_tokens || 0,
-					outputTokens: requestyUsage.completion_tokens || 0,
-					cacheReadTokens: requestyUsage.prompt_tokens_details?.cached_tokens || 0,
-					cacheWriteTokens: requestyUsage.prompt_tokens_details?.caching_tokens || 0,
-					totalCost: requestyUsage.total_cost || 0 // TODO: Replace with calculateApiCostOpenAI once implemented
-				}
+				const usage = chunk.usage as RequestyUsage
+				const inputTokens = usage.prompt_tokens || 0
+				const outputTokens = usage.completion_tokens || 0
+				const cacheWriteTokens = usage.prompt_tokens_details?.caching_tokens || undefined
+				const cacheReadTokens = usage.prompt_tokens_details?.cached_tokens || undefined
+				const totalCost = 0 // TODO: Replace with calculateApiCostOpenAI(model.info, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens)
+
 				yield {
 					type: "usage",
-					...usage,
-					cacheWriteTokens: usage.cacheWriteTokens || undefined,
-					cacheReadTokens: usage.cacheReadTokens || undefined
+					inputTokens: inputTokens,
+					outputTokens: outputTokens,
+					cacheWriteTokens: cacheWriteTokens,
+					cacheReadTokens: cacheReadTokens,
+					totalCost: totalCost,
 				}
 			}
 		}
-
-		// Log complete output
-		await logStreamOutput({
-			async *[Symbol.asyncIterator]() {
-				// First yield all text/reasoning chunks
-				for (const chunk of chunks) {
-					yield chunk
-				}
-				// Then yield usage information as a text chunk
-				yield {
-					type: "text",
-					text: `\nUsage Metrics:\nInput Tokens: ${usage.inputTokens}\nOutput Tokens: ${usage.outputTokens}\nCache Read Tokens: ${usage.cacheReadTokens}\nCache Write Tokens: ${usage.cacheWriteTokens}\nTotal Cost: ${usage.totalCost}`
-				}
-			}
-		} as ApiStream)
 	}
 
 	getModel(): { id: string; info: ModelInfo } {

@@ -11,7 +11,7 @@ import { BedrockRuntimeClient, InvokeModelWithResponseStreamCommand } from "@aws
 
 
 import { Message } from "ollama"
-import { logMessages, logStreamOutput } from "../../core/prompts/show_prompt"
+import { logMessages } from "../../core/prompts/show_prompt"
 
 // https://docs.anthropic.com/en/api/claude-on-amazon-bedrock
 export class AwsBedrockHandler implements ApiHandler {
@@ -35,8 +35,6 @@ export class AwsBedrockHandler implements ApiHandler {
 		]
 		logMessages(ollamaMessages)
 
-		// Create array to collect chunks for logging
-		const chunks: Array<{ type: "text", text: string }> = []
 
 		// cross region inference requires prefixing the model id with the region
 		let modelId = await this.getModelId()
@@ -81,24 +79,24 @@ export class AwsBedrockHandler implements ApiHandler {
 						content:
 							typeof message.content === "string"
 								? [
-									{
-										type: "text",
-										text: message.content,
-										...(this.options.awsBedrockUsePromptCache === true && {
-											cache_control: { type: "ephemeral" },
-										}),
-									},
-								]
-								: message.content.map((content, contentIndex) =>
-									contentIndex === message.content.length - 1
-										? {
-											...content,
+										{
+											type: "text",
+											text: message.content,
 											...(this.options.awsBedrockUsePromptCache === true && {
 												cache_control: { type: "ephemeral" },
 											}),
-										}
-										: content,
-								),
+										},
+									]
+								: message.content.map((content, contentIndex) =>
+										contentIndex === message.content.length - 1
+											? {
+													...content,
+													...(this.options.awsBedrockUsePromptCache === true && {
+														cache_control: { type: "ephemeral" },
+													}),
+												}
+											: content,
+									),
 					}
 				}
 				return message
@@ -164,26 +162,15 @@ export class AwsBedrockHandler implements ApiHandler {
 							}
 							break
 						case "text_delta":
-							const textChunk = {
-								type: "text" as const,
+							yield {
+								type: "text",
 								text: chunk.delta.text,
 							}
-							chunks.push(textChunk)
-							yield textChunk
 							break
 					}
 					break
 			}
 		}
-
-		// Log complete output
-		await logStreamOutput({
-			async *[Symbol.asyncIterator]() {
-				for (const chunk of chunks) {
-					yield chunk
-				}
-			}
-		} as ApiStream)
 	}
 
 	getModel(): { id: BedrockModelId; info: ModelInfo } {

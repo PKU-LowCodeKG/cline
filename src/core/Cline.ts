@@ -63,6 +63,7 @@ import { ClineProvider, GlobalFileNames } from "./webview/ClineProvider"
 import { DEFAULT_LANGUAGE_SETTINGS, getLanguageKey, LanguageDisplay, LanguageKey } from "../shared/Languages"
 import { telemetryService } from "../services/telemetry/TelemetryService"
 import pTimeout from "p-timeout"
+import { logOutput } from "./prompts/show_prompt"
 
 const cwd = vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath).at(0) ?? path.join(os.homedir(), "Desktop") // may or may not exist but fs checking existence would immediately ask for permission which would be bad UX, need to come up with a better solution
 
@@ -3602,6 +3603,8 @@ export class Cline {
 			// NOTE: assistantMessage 字符串是 原始的 LLM response 加上了 3 种说明之一（this.abort、this.didRejectTool、this.didAlreadyUseTool）
 			// - 在之前处理 LLM response 的流式结果时，this.abort 为 true，则利用 abortStream 中加入对话历史
 			// - 否则，在下面 将其加入对话历史
+			console.log("Cline 拼接好的 chunk.type 为 text 的 输出", assistantMessage)
+			logOutput(assistantMessage)
 
 			if (assistantMessage.length > 0) {
 				telemetryService.captureConversationTurnEvent(this.taskId, this.apiProvider, this.api.getModel().id, "assistant")

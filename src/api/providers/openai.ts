@@ -10,7 +10,7 @@ import { ChatCompletionReasoningEffort } from "openai/resources/chat/completions
 
 
 import { Message } from "ollama"
-import { logMessages, logStreamOutput } from "../../core/prompts/show_prompt"
+import { logMessages } from "../../core/prompts/show_prompt"
 
 export class OpenAiHandler implements ApiHandler {
 	private options: ApiHandlerOptions
@@ -47,12 +47,6 @@ export class OpenAiHandler implements ApiHandler {
 		]
 		logMessages(ollamaMessages)
 
-		// Create array to collect chunks for logging
-		const chunks: Array<{ type: "text" | "reasoning", text?: string, reasoning?: string }> = []
-		let usage = {
-			inputTokens: 0,
-			outputTokens: 0
-		}
 
 		const modelId = this.options.openAiModelId ?? ""
 		const isDeepseekReasoner = modelId.includes("deepseek-reasoner")
@@ -86,49 +80,27 @@ export class OpenAiHandler implements ApiHandler {
 		for await (const chunk of stream) {
 			const delta = chunk.choices[0]?.delta
 			if (delta?.content) {
-				const textChunk = {
-					type: "text" as const,
-					text: delta.content
+				yield {
+					type: "text",
+					text: delta.content,
 				}
-				chunks.push(textChunk)
-				yield textChunk
 			}
 
 			if (delta && "reasoning_content" in delta && delta.reasoning_content) {
-				const reasoningChunk = {
-					type: "reasoning" as const,
-					reasoning: (delta.reasoning_content as string | undefined) || ""
+				yield {
+					type: "reasoning",
+					reasoning: (delta.reasoning_content as string | undefined) || "",
 				}
-				chunks.push(reasoningChunk)
-				yield reasoningChunk
 			}
 
 			if (chunk.usage) {
-				usage = {
-					inputTokens: chunk.usage.prompt_tokens || 0,
-					outputTokens: chunk.usage.completion_tokens || 0
-				}
 				yield {
 					type: "usage",
-					...usage
+					inputTokens: chunk.usage.prompt_tokens || 0,
+					outputTokens: chunk.usage.completion_tokens || 0,
 				}
 			}
 		}
-
-		// Log complete output including usage information
-		await logStreamOutput({
-			async *[Symbol.asyncIterator]() {
-				// First yield all text and reasoning chunks
-				for (const chunk of chunks) {
-					yield chunk
-				}
-				// Then yield usage information as a text chunk
-				yield {
-					type: "text",
-					text: `\nUsage Metrics:\nInput Tokens: ${usage.inputTokens}\nOutput Tokens: ${usage.outputTokens}`
-				}
-			}
-		} as ApiStream)
 	}
 
 	getModel(): { id: string; info: ModelInfo } {

@@ -12,7 +12,7 @@ import { ApiStream } from "../transform/stream"
 
 
 import { Message } from "ollama"
-import { logMessages, logStreamOutput } from "../../core/prompts/show_prompt"
+import { logMessages } from "../../core/prompts/show_prompt"
 
 type AskSageRequest = {
 	system_prompt: string
@@ -51,8 +51,6 @@ export class AskSageHandler implements ApiHandler {
 
 	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
 		try {
-			const model = this.getModel()
-
 			// Convert messages to Ollama format for logging
 			const ollamaMessages: Message[] = [
 				{ role: "system", content: systemPrompt },
@@ -64,6 +62,9 @@ export class AskSageHandler implements ApiHandler {
 				}))
 			]
 			logMessages(ollamaMessages)
+
+
+			const model = this.getModel()
 
 			// Transform messages into AskSageRequest format
 			const formattedMessages = messages.map((msg) => {
@@ -105,21 +106,11 @@ export class AskSageHandler implements ApiHandler {
 				throw new Error("No content in AskSage response")
 			}
 
-			// Create response chunk
-			const responseChunk = {
+			// Return entire response as a single chunk since streaming is not supported
+			yield {
 				type: "text",
 				text: result.message,
-			} as const
-
-			// Log complete output
-			await logStreamOutput({
-				async *[Symbol.asyncIterator]() {
-					yield responseChunk
-				}
-			} as ApiStream)
-
-			// Return response chunk
-			yield responseChunk
+			}
 		} catch (error) {
 			if (error instanceof Error) {
 				throw new Error(`AskSage request failed: ${error.message}`)
