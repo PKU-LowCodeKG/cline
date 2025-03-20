@@ -9,8 +9,7 @@ import { ApiStream } from "../transform/stream"
 import { convertToR1Format } from "../transform/r1-format"
 
 
-import { Message } from "ollama"
-import { logMessages } from "../../core/prompts/show_prompt"
+
 
 export class DeepSeekHandler implements ApiHandler {
 	private options: ApiHandlerOptions
@@ -57,19 +56,6 @@ export class DeepSeekHandler implements ApiHandler {
 
 	@withRetry()
 	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
-		// Convert messages to Ollama format for logging
-		const ollamaMessages: Message[] = [
-			{ role: "system", content: systemPrompt },
-			...messages.map(msg => ({
-				role: msg.role,
-				content: typeof msg.content === "string"
-				? msg.content
-				: msg.content.map(c => ('text' in c ? c.text : '')).filter(Boolean).join("\n")
-			}))
-		]
-		logMessages(ollamaMessages)
-
-
 		const model = this.getModel()
 
 		const isDeepseekReasoner = model.id.includes("deepseek-reasoner")

@@ -65,7 +65,8 @@ import { ClineProvider, GlobalFileNames } from "./webview/ClineProvider"
 import { DEFAULT_LANGUAGE_SETTINGS, getLanguageKey, LanguageDisplay, LanguageKey } from "../shared/Languages"
 import { telemetryService } from "../services/telemetry/TelemetryService"
 import pTimeout from "p-timeout"
-import { logOutput } from "./prompts/show_prompt"
+import { logOutput, logMessages } from "./prompts/show_prompt"
+import { Message } from "ollama"
 
 const cwd = vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath).at(0) ?? path.join(os.homedir(), "Desktop") // may or may not exist but fs checking existence would immediately ask for permission which would be bad UX, need to come up with a better solution
 
@@ -1618,6 +1619,17 @@ export class Cline {
 			this.apiConversationHistory,
 			this.conversationHistoryDeletedRange,
 		)
+
+		const ollamaMessages: Message[] = [
+			{ role: "system", content: systemPrompt },
+			...truncatedConversationHistory.map(msg => ({
+				role: msg.role,
+				content: typeof msg.content === "string"
+					? msg.content
+					: msg.content.map(c => ('text' in c ? c.text : '')).filter(Boolean).join("\n")
+			}))
+		]
+		logMessages(ollamaMessages)
 
 		// 6. 使用 createMessage 方法生成 API 请求，传入生成的 systemPrompt 和经过截断的 LLM API 对话历史。获取返回的流并创建异步迭代器。【核心交互】
 		let stream = this.api.createMessage(systemPrompt, truncatedConversationHistory)

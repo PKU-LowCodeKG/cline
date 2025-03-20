@@ -10,8 +10,7 @@ import { fromNodeProviderChain } from "@aws-sdk/credential-providers"
 import { BedrockRuntimeClient, InvokeModelWithResponseStreamCommand } from "@aws-sdk/client-bedrock-runtime"
 
 
-import { Message } from "ollama"
-import { logMessages } from "../../core/prompts/show_prompt"
+
 
 // https://docs.anthropic.com/en/api/claude-on-amazon-bedrock
 export class AwsBedrockHandler implements ApiHandler {
@@ -23,17 +22,7 @@ export class AwsBedrockHandler implements ApiHandler {
 
 	@withRetry()
 	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
-		// Convert messages to Ollama format for logging
-		const ollamaMessages: Message[] = [
-			{ role: "system", content: systemPrompt },
-			...messages.map(msg => ({
-				role: msg.role,
-				content: typeof msg.content === "string"
-					? msg.content
-					: msg.content.map(c => ('text' in c ? c.text : '')).filter(Boolean).join("\n")
-			}))
-		]
-		logMessages(ollamaMessages)
+
 
 
 		// cross region inference requires prefixing the model id with the region
