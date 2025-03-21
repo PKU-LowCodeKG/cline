@@ -10,8 +10,7 @@ import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { OpenRouterErrorResponse } from "./types"
 
 
-import { Message } from "ollama"
-import { logMessages } from "../../core/prompts/show_prompt"
+
 
 export class OpenRouterHandler implements ApiHandler {
 	private options: ApiHandlerOptions
@@ -32,19 +31,6 @@ export class OpenRouterHandler implements ApiHandler {
 
 	@withRetry()
 	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
-		// Convert messages to Ollama format for logging
-		const ollamaMessages: Message[] = [
-			{ role: "system", content: systemPrompt },
-			...messages.map(msg => ({
-			role: msg.role,
-			content: typeof msg.content === "string"
-				? msg.content
-				: msg.content.map(c => ('text' in c ? c.text : '')).filter(Boolean).join("\n")
-			}))
-		]
-		logMessages(ollamaMessages)
-
-
 		this.lastGenerationId = undefined
 
 		const stream = await createOpenRouterStream(

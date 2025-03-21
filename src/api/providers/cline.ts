@@ -8,8 +8,7 @@ import axios from "axios"
 import { OpenRouterErrorResponse } from "./types"
 
 
-import { Message } from "ollama"
-import { logMessages } from "../../core/prompts/show_prompt"
+
 
 export class ClineHandler implements ApiHandler {
 	private options: ApiHandlerOptions
@@ -25,17 +24,7 @@ export class ClineHandler implements ApiHandler {
 	}
 
 	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
-		// Convert messages to Ollama format for logging
-		const ollamaMessages: Message[] = [
-			{ role: "system", content: systemPrompt },
-			...messages.map(msg => ({
-				role: msg.role,
-				content: typeof msg.content === "string"
-					? msg.content
-					: msg.content.map(c => ('text' in c ? c.text : '')).filter(Boolean).join("\n")
-			}))
-		]
-		logMessages(ollamaMessages)
+
 
 
 		this.lastGenerationId = undefined

@@ -11,8 +11,7 @@ import {
 import { ApiStream } from "../transform/stream"
 
 
-import { Message } from "ollama"
-import { logMessages } from "../../core/prompts/show_prompt"
+
 
 type AskSageRequest = {
 	system_prompt: string
@@ -51,19 +50,6 @@ export class AskSageHandler implements ApiHandler {
 
 	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
 		try {
-			// Convert messages to Ollama format for logging
-			const ollamaMessages: Message[] = [
-				{ role: "system", content: systemPrompt },
-				...messages.map(msg => ({
-					role: msg.role,
-					content: Array.isArray(msg.content)
-						? msg.content.map(block => ("text" in block ? block.text : "")).join("")
-						: msg.content
-				}))
-			]
-			logMessages(ollamaMessages)
-
-
 			const model = this.getModel()
 
 			// Transform messages into AskSageRequest format

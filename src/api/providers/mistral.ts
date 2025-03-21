@@ -16,8 +16,7 @@ import { convertToMistralMessages } from "../transform/mistral-format"
 import { ApiStream } from "../transform/stream"
 
 
-import { Message } from "ollama"
-import { logMessages } from "../../core/prompts/show_prompt"
+
 
 export class MistralHandler implements ApiHandler {
 	private options: ApiHandlerOptions
@@ -32,17 +31,7 @@ export class MistralHandler implements ApiHandler {
 
 	@withRetry()
 	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
-		// Convert messages to Ollama format for logging
-		const ollamaMessages: Message[] = [
-			{ role: "system", content: systemPrompt },
-			...messages.map(msg => ({
-				role: msg.role,
-				content: typeof msg.content === "string"
-					? msg.content
-					: msg.content.map(c => ('text' in c ? c.text : '')).filter(Boolean).join("\n")
-			}))
-		]
-		logMessages(ollamaMessages)
+
 
 
 		const stream = await this.client.chat.stream({
