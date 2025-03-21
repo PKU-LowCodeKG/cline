@@ -109,7 +109,6 @@ export function getContextMenuOptions(
 			{ type: ContextMenuOptionType.Folder },
 			{ type: ContextMenuOptionType.File },
 
-
 			// 增加 repoCrawler 选项
 			{ type: ContextMenuOptionType.RepoCrawler },
 		]
@@ -120,10 +119,9 @@ export function getContextMenuOptions(
 
 	// Check for top-level option matches
 
-
 	// 增加 repoCrawler 选项
 	if ("repoCrawler".startsWith(lowerQuery)) {
-		suggestions.push({type: ContextMenuOptionType.RepoCrawler})
+		suggestions.push({ type: ContextMenuOptionType.RepoCrawler })
 	}
 
 	if ("git".startsWith(lowerQuery)) {

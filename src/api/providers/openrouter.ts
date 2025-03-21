@@ -9,9 +9,6 @@ import { createOpenRouterStream } from "../transform/openrouter-stream"
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { OpenRouterErrorResponse } from "./types"
 
-
-
-
 export class OpenRouterHandler implements ApiHandler {
 	private options: ApiHandlerOptions
 	private client: OpenAI

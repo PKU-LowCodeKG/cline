@@ -6,9 +6,6 @@ import { withRetry } from "../retry"
 import { convertToOpenAiMessages } from "../transform/openai-format"
 import { ApiStream } from "../transform/stream"
 
-
-
-
 export class RequestyHandler implements ApiHandler {
 	private options: ApiHandlerOptions
 	private client: OpenAI
@@ -27,9 +24,6 @@ export class RequestyHandler implements ApiHandler {
 
 	@withRetry()
 	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
-
-
-
 		const modelId = this.options.requestyModelId ?? ""
 
 		let openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [

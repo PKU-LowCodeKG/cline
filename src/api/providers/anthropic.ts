@@ -5,9 +5,6 @@ import { anthropicDefaultModelId, AnthropicModelId, anthropicModels, ApiHandlerO
 import { ApiHandler } from "../index"
 import { ApiStream } from "../transform/stream"
 
-
-
-
 export class AnthropicHandler implements ApiHandler {
 	private options: ApiHandlerOptions
 	private client: Anthropic
@@ -22,9 +19,6 @@ export class AnthropicHandler implements ApiHandler {
 
 	@withRetry()
 	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
-
-
-
 		const model = this.getModel()
 		let stream: AnthropicStream<Anthropic.RawMessageStreamEvent>
 		const modelId = model.id

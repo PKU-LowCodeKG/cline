@@ -16,7 +16,7 @@ import * as vscode from "vscode"
 // Zod 是一个 TypeScript 优先的 schema（任何数据类型）的声明和验证库
 // https://www.npmjs.com/package/zod
 import { z } from "zod"
-import { ClineProvider, GlobalFileNames } from "../../core/webview/ClineProvider"
+import { ClineProvider } from "../../core/webview/ClineProvider"
 import {
 	DEFAULT_MCP_TIMEOUT_SECONDS,
 	McpMode,
@@ -31,6 +31,7 @@ import {
 import { fileExistsAtPath } from "../../utils/fs"
 import { arePathsEqual } from "../../utils/path"
 import { secondsToMs } from "../../utils/time"
+import { GlobalFileNames } from "../../global-constants"
 export type McpConnection = {
 	/** Cline 自定义的 MCP 服务器，不是官方的 McpServer 类型 */
 	server: McpServer

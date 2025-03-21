@@ -9,25 +9,25 @@ let currentLogFile = ""
 
 // 生成标题导航
 const generateTOC = (messages: Message[]) => {
-    const titles = [];
-    titles.push(`<li><a href="#interaction-${interactionCount}">Interaction ${interactionCount}</a></li>`);
-    titles.push(`<li class="sub-nav"><a href="#input-${interactionCount}">Input</a></li>`);
-    
-    // 添加每个消息的角色到导航
-    messages.forEach((msg, index) => {
-        titles.push(`<li class="sub-nav-role">
+	const titles = []
+	titles.push(`<li><a href="#interaction-${interactionCount}">Interaction ${interactionCount}</a></li>`)
+	titles.push(`<li class="sub-nav"><a href="#input-${interactionCount}">Input</a></li>`)
+
+	// 添加每个消息的角色到导航
+	messages.forEach((msg, index) => {
+		titles.push(`<li class="sub-nav-role">
             <a href="#role-${interactionCount}-${index}">${msg.role}</a>
-        </li>`);
-    });
-    
-    return titles.join('\n');
-};
+        </li>`)
+	})
+
+	return titles.join("\n")
+}
 
 export function logMessages(messages: Message[]) {
-    interactionCount++
+	interactionCount++
 
-    // 添加新的CSS样式到styles中
-    const styles = `
+	// 添加新的CSS样式到styles中
+	const styles = `
         <style>
             body {
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -154,12 +154,16 @@ export function logMessages(messages: Message[]) {
         </style>
     `
 
-    const messages_html = messages.map((msg, index) => `
+	const messages_html = messages
+		.map(
+			(msg, index) => `
         <h3 id="role-${interactionCount}-${index}">${msg.role}</h3>
-        <div>${msg.content.replace(/\n/g, '<br/>')}</div>
-    `).join('\n')
-    
-    const htmlContent = `
+        <div>${msg.content.replace(/\n/g, "<br/>")}</div>
+    `,
+		)
+		.join("\n")
+
+	const htmlContent = `
         <!DOCTYPE html>
         <html>
         <head>
@@ -186,38 +190,37 @@ export function logMessages(messages: Message[]) {
         </html>
     `
 
-    if (interactionCount === 1) {
-        const now = new Date()
-        const formattedTime = now.toLocaleString('zh-CN', {
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit'
-        }).replace(/[\/:]/g, '-')
+	if (interactionCount === 1) {
+		const now = new Date()
+		const formattedTime = now
+			.toLocaleString("zh-CN", {
+				year: "numeric",
+				month: "2-digit",
+				day: "2-digit",
+				hour: "2-digit",
+				minute: "2-digit",
+			})
+			.replace(/[\/:]/g, "-")
 
-        const logDir = path.join(globalStoragePath, 'log')
-        if (!fs.existsSync(logDir)) {
-            fs.mkdirSync(logDir, { recursive: true })
-        }
+		const logDir = path.join(globalStoragePath, "log")
+		if (!fs.existsSync(logDir)) {
+			fs.mkdirSync(logDir, { recursive: true })
+		}
 
-        currentLogFile = path.join(logDir, `${formattedTime}.html`)
-        console.log(`Logging interactions to ${currentLogFile}`)
-        fs.writeFileSync(currentLogFile, htmlContent)
-    } else {
-        // Read existing content
-        const existingContent = fs.readFileSync(currentLogFile, 'utf8')
-        
-        // Update navigation - replace everything between <ul> and </ul>
-        const updatedContent = existingContent.replace(
-            `</ul>`,
-            `\n${generateTOC(messages)}\n</ul>`
-        )
-        
-        // Add new interaction content before closing body tag
-        const finalContent = updatedContent.replace(
-            '</body>',
-            `
+		currentLogFile = path.join(logDir, `${formattedTime}.html`)
+		console.log(`Logging interactions to ${currentLogFile}`)
+		fs.writeFileSync(currentLogFile, htmlContent)
+	} else {
+		// Read existing content
+		const existingContent = fs.readFileSync(currentLogFile, "utf8")
+
+		// Update navigation - replace everything between <ul> and </ul>
+		const updatedContent = existingContent.replace(`</ul>`, `\n${generateTOC(messages)}\n</ul>`)
+
+		// Add new interaction content before closing body tag
+		const finalContent = updatedContent.replace(
+			"</body>",
+			`
             <div>
                 <h1 id="interaction-${interactionCount}">Interaction ${interactionCount}</h1>
                 <h2 id="input-${interactionCount}">Input</h2>
@@ -225,36 +228,33 @@ export function logMessages(messages: Message[]) {
                     ${messages_html}
                 </div>
             </div>
-        </body>`
-        )
-        
-        fs.writeFileSync(currentLogFile, finalContent)
-    }
+        </body>`,
+		)
+
+		fs.writeFileSync(currentLogFile, finalContent)
+	}
 }
 
 /**
  * Cline 在 recursivelyMakeClineRequests 中已经维护了 chunk.type 为 text 的 LLM 输出。直接把对应的字符串输出即可
- * @param outputBuffer 
+ * @param outputBuffer
  */
 export function logOutput(outputBuffer: string = "") {
-    // Read existing content
-    const existingContent = fs.readFileSync(currentLogFile, 'utf8')
-    
-    // Replace entire navigation content and add output section
-    const updatedContent = existingContent
-        .replace(
-            `</ul>`,
-            `\n<li class="sub-nav"><a href="#output-${interactionCount}">Output</a></li></ul>`
-        )
-        .replace(
-            '</body>',
-            `
+	// Read existing content
+	const existingContent = fs.readFileSync(currentLogFile, "utf8")
+
+	// Replace entire navigation content and add output section
+	const updatedContent = existingContent
+		.replace(`</ul>`, `\n<li class="sub-nav"><a href="#output-${interactionCount}">Output</a></li></ul>`)
+		.replace(
+			"</body>",
+			`
             <div>
                 <h2 id="output-${interactionCount}">Output</h2>
                 <pre><code>${outputBuffer}</code></pre>
             </div>
-        </body>`
-        )
-    
-    fs.writeFileSync(currentLogFile, updatedContent)
+        </body>`,
+		)
+
+	fs.writeFileSync(currentLogFile, updatedContent)
 }

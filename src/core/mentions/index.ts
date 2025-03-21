@@ -39,7 +39,6 @@ export function openMention(mention?: string): void {
 	}
 }
 
-
 /**
  * 【主线】解析 用户输入/生成的 文本中的 mentions（@），并将 mentions（@）的详细信息追加到解析后的文本中。
  *
@@ -49,7 +48,12 @@ export function openMention(mention?: string): void {
  * @param urlContentFetcher 用于从 URL 获取内容并转换为 Markdown 的工具实例。
  * @returns 解析后的文本，包含原始文本和提及内容的详细信息。
  */
-export async function parseMentions(text: string, cwd: string, urlContentFetcher: UrlContentFetcher, _cline: Cline): Promise<string> {
+export async function parseMentions(
+	text: string,
+	cwd: string,
+	urlContentFetcher: UrlContentFetcher,
+	_cline: Cline,
+): Promise<string> {
 	// 创建一个Set来存储文本中出现的所有 mentions（@）
 	const mentions: Set<string> = new Set()
 
@@ -88,10 +92,7 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 		// 如果提及内容是一个7到40位的十六进制字符串，可能是Git提交哈希值
 		else if (/^[a-f0-9]{7,40}$/.test(mention)) {
 			return `Git commit '${mention}' (see below for commit info)`
-		}
-
-
-		else if (mention.startsWith("repoCrawler")) {
+		} else if (mention.startsWith("repoCrawler")) {
 			return `搜索和用户描述相关的可复用仓库`
 		}
 		// 如果都不匹配，则返回原始匹配内容
@@ -191,7 +192,6 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 			}
 		}
 
-
 		// 如果提及内容是 "repoCrawler"
 		else if (mention.startsWith("repoCrawler")) {
 			// 使用正则表达式从mention中提取 用户希望爬虫检索的需求
@@ -205,7 +205,7 @@ export async function parseMentions(text: string, cwd: string, urlContentFetcher
 						let newTask = `<task>\n${_text}。请使用 git clone 命令下载这个仓库，并使用 code 命令，在当前 VS Code 工作区中打开这个仓库\n</task>`
 						let _newTask = parsedText.replace(/<task>[\s\S]*<\/task>/, newTask)
 						parsedText = _newTask
-	
+
 						// 2. 加上 URL 信息
 						parsedText += "\n\n" + url
 						console.log("新任务：", parsedText)
@@ -301,7 +301,6 @@ function getWorkspaceProblems(cwd: string): string {
 	return result
 }
 
-
 // #region 仓库搜索相关
 interface RepoInfo {
 	clone_url: string
@@ -330,8 +329,8 @@ const handleRepoSearchAgent = async (req: string, _cline: Cline) => {
 			headers: {
 				"Content-Type": "application/json",
 			},
-			body: JSON.stringify({ "query": req || "React应用" }),
-			signal
+			body: JSON.stringify({ query: req || "React应用" }),
+			signal,
 		})
 
 		if (!response.ok) {
@@ -354,38 +353,38 @@ const handleRepoSearchAgent = async (req: string, _cline: Cline) => {
 					const lines = text.split("\n\n")
 
 					for (const line of lines) {
-						if (line.startsWith('data: ')) {
+						if (line.startsWith("data: ")) {
 							const { step, data } = JSON.parse(line.slice(6))
 							// 根据不同步骤展示不同的信息
 							switch (step) {
-								case 'initial_requirements':
+								case "initial_requirements":
 									await _cline.say("checkpoint_created")
 									await _cline.say("text", `正在分析您的需求: "${data}"...`)
 									break
-								case 'refined_requirements':
+								case "refined_requirements":
 									await _cline.say("checkpoint_created")
 									await _cline.say("text", `我理解您的核心需求是: "${data}"`)
 									break
-								case 'search_keywords':
+								case "search_keywords":
 									await _cline.say("checkpoint_created")
 									await _cline.say("text", `使用以下关键词搜索: ${data.join(", ")}`)
 									break
-								case 'initial_repositories':
+								case "initial_repositories":
 									await _cline.say("checkpoint_created")
 									await _cline.say("text", `初步找到 ${data} 个相关仓库，正在筛选...`)
 									break
-								case 'unique_repositories':
+								case "unique_repositories":
 									await _cline.say("checkpoint_created")
 									await _cline.say("text", `去重后剩余 ${data} 个仓库`)
 									break
-								case 'recalled_repositories':
+								case "recalled_repositories":
 									await _cline.say("checkpoint_created")
 									await _cline.say("text", `筛选出最相关的 ${data.length} 个仓库，正在评估仓库1/3...`)
 									break
-								case 'evaluation_progress':
+								case "evaluation_progress":
 									await _cline.say("checkpoint_created")
 
-									const { index, total, current }: { index: number, total: number, current: RepoInfo} = data;
+									const { index, total, current }: { index: number; total: number; current: RepoInfo } = data
 									url += current.html_url + "\n\n"
 
 									await _cline.say("text", `第${index}个仓库的评估结果是\n\n${buildRepoInfoString(current)}`)
@@ -393,10 +392,10 @@ const handleRepoSearchAgent = async (req: string, _cline: Cline) => {
 										await _cline.say("text", `正在评估仓库 (${index + 1}/${total})...`)
 									}
 									break
-								case 'final_result':
+								case "final_result":
 									await _cline.say("checkpoint_created")
 
-									repositories = data;
+									repositories = data
 
 									await _cline.say("text", `评估完成！`)
 									break
@@ -407,7 +406,7 @@ const handleRepoSearchAgent = async (req: string, _cline: Cline) => {
 			} catch (error) {
 				console.error("读取流时出错:", error)
 				controller.abort()
-				throw error;
+				throw error
 			}
 		}
 
@@ -416,17 +415,19 @@ const handleRepoSearchAgent = async (req: string, _cline: Cline) => {
 		}
 
 		// 这里再提问一下用户，让用户选择一个项目进行复用
-		const { text, images } = await _cline.ask("followup", "检索到的项目已经展示结束，请您选择一个项目进行复用。在您选择后，我们会自动下载项目")
+		const { text, images } = await _cline.ask(
+			"followup",
+			"检索到的项目已经展示结束，请您选择一个项目进行复用。在您选择后，我们会自动下载项目",
+		)
 		await _cline.say("user_feedback", text ?? "", images)
 
 		_text = text ?? ""
 		_images = images ?? []
-
 	} catch (error) {
 		console.error("搜索GitHub仓库失败:", error)
 		await _cline.say("text", "搜索GitHub仓库失败")
 	}
-	return { repositories, url, _text, _images };
+	return { repositories, url, _text, _images }
 }
 
 const buildRepoInfoString = (repo: RepoInfo): string => {
@@ -446,5 +447,3 @@ ${repo.readme.slice(12, -3)}
 	return repoInfoString
 }
 // #endregion
-
-

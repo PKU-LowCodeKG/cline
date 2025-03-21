@@ -7,9 +7,6 @@ import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import axios from "axios"
 import { OpenRouterErrorResponse } from "./types"
 
-
-
-
 export class ClineHandler implements ApiHandler {
 	private options: ApiHandlerOptions
 	private client: OpenAI
@@ -24,9 +21,6 @@ export class ClineHandler implements ApiHandler {
 	}
 
 	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
-
-
-
 		this.lastGenerationId = undefined
 
 		const stream = await createOpenRouterStream(

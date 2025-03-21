@@ -14,9 +14,6 @@ import { calculateApiCostOpenAI } from "../../utils/cost"
 import { ApiStream } from "../transform/stream"
 import { ChatCompletionReasoningEffort } from "openai/resources/chat/completions.mjs"
 
-
-
-
 export class OpenAiNativeHandler implements ApiHandler {
 	private options: ApiHandlerOptions
 	private client: OpenAI
@@ -46,9 +43,6 @@ export class OpenAiNativeHandler implements ApiHandler {
 
 	@withRetry()
 	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
-
-
-
 		const model = this.getModel()
 
 		switch (model.id) {

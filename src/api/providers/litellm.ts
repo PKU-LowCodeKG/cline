@@ -5,9 +5,6 @@ import { ApiHandler } from ".."
 import { ApiStream } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
 
-
-
-
 export class LiteLlmHandler implements ApiHandler {
 	private options: ApiHandlerOptions
 	private client: OpenAI
@@ -21,9 +18,6 @@ export class LiteLlmHandler implements ApiHandler {
 	}
 
 	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
-
-
-
 		const formattedMessages = convertToOpenAiMessages(messages)
 		const systemMessage: OpenAI.Chat.ChatCompletionSystemMessageParam = {
 			role: "system",

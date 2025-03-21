@@ -15,9 +15,6 @@ import { convertToOpenAiMessages } from "../transform/openai-format"
 import { ApiStream } from "../transform/stream"
 import { convertToR1Format } from "../transform/r1-format"
 
-
-
-
 export class QwenHandler implements ApiHandler {
 	private options: ApiHandlerOptions
 	private client: OpenAI
@@ -52,9 +49,6 @@ export class QwenHandler implements ApiHandler {
 	}
 
 	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
-
-
-
 		const model = this.getModel()
 		const isDeepseekReasoner = model.id.includes("deepseek-r1")
 		let openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
