@@ -37,6 +37,8 @@ import { TelemetrySetting } from "../../shared/TelemetrySetting"
 import { cleanupLegacyCheckpoints } from "../../integrations/checkpoints/CheckpointMigration"
 import CheckpointTracker from "../../integrations/checkpoints/CheckpointTracker"
 import { getTotalTasksSize } from "../../utils/storage"
+import { ConversationTelemetryService } from "../../services/telemetry/ConversationTelemetryService"
+import { GlobalFileNames } from "../../global-constants"
 
 /*
 https://github.com/microsoft/vscode-webview-ui-toolkit-samples/blob/main/default/weather-webview/src/providers/WeatherViewProvider.ts
@@ -110,14 +112,6 @@ type GlobalStateKey =
 	| "thinkingBudgetTokens"
 	| "planActSeparateModelsSetting"
 
-export const GlobalFileNames = {
-	apiConversationHistory: "api_conversation_history.json",
-	uiMessages: "ui_messages.json",
-	openRouterModels: "openrouter_models.json",
-	mcpSettings: "cline_mcp_settings.json",
-	clineRules: ".clinerules",
-}
-
 export class ClineProvider implements vscode.WebviewViewProvider {
 	public static readonly sideBarId = "claude-dev.SidebarProvider" // used in package.json as the view's id. This value cannot be changed due to how vscode caches views based on their id, and updating the id would break existing instances of the extension.
 	public static readonly tabPanelId = "claude-dev.TabPanelProvider"
@@ -128,6 +122,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	workspaceTracker?: WorkspaceTracker
 	mcpHub?: McpHub
 	private latestAnnouncementId = "feb-19-2025" // update to some unique identifier when we add a new announcement
+	conversationTelemetryService: ConversationTelemetryService
 
 	constructor(
 		readonly context: vscode.ExtensionContext,
@@ -137,6 +132,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		ClineProvider.activeInstances.add(this)
 		this.workspaceTracker = new WorkspaceTracker(this)
 		this.mcpHub = new McpHub(this)
+		this.conversationTelemetryService = new ConversationTelemetryService(this)
 
 		// Clean up legacy checkpoints
 		cleanupLegacyCheckpoints(this.context.globalStorageUri.fsPath, this.outputChannel).catch((error) => {
@@ -167,6 +163,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		this.workspaceTracker = undefined
 		this.mcpHub?.dispose()
 		this.mcpHub = undefined
+		this.conversationTelemetryService.shutdown()
 		this.outputChannel.appendLine("Disposed all disposables")
 		ClineProvider.activeInstances.delete(this)
 	}
