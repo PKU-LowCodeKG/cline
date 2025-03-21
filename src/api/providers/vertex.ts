@@ -6,9 +6,6 @@ import { ApiHandlerOptions, ModelInfo, vertexDefaultModelId, VertexModelId, vert
 import { ApiStream } from "../transform/stream"
 import { VertexAI } from "@google-cloud/vertexai"
 
-
-
-
 // https://docs.anthropic.com/en/api/claude-on-vertex-ai
 export class VertexHandler implements ApiHandler {
 	private options: ApiHandlerOptions
@@ -30,9 +27,6 @@ export class VertexHandler implements ApiHandler {
 
 	@withRetry()
 	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
-
-
-
 		const model = this.getModel()
 		const modelId = model.id
 

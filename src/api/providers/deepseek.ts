@@ -8,9 +8,6 @@ import { convertToOpenAiMessages } from "../transform/openai-format"
 import { ApiStream } from "../transform/stream"
 import { convertToR1Format } from "../transform/r1-format"
 
-
-
-
 export class DeepSeekHandler implements ApiHandler {
 	private options: ApiHandlerOptions
 	private client: OpenAI

@@ -115,8 +115,6 @@ type GlobalStateKey =
 	| "thinkingBudgetTokens"
 	| "planActSeparateModelsSetting"
 
-
-
 /**
  * Cline 的全局文件名
  * 1. 在 Windows 上，`context.globalStorageUri.fsPath` 为：
@@ -160,7 +158,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	workspaceTracker?: WorkspaceTracker
 	mcpHub?: McpHub
 	private latestAnnouncementId = "feb-19-2025" // update to some unique identifier when we add a new announcement
-
 
 	/**
 	 * 构造函数用于初始化ClineProvider实例及其核心组件
@@ -239,11 +236,9 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
-
 	async setUserInfo(info?: { displayName: string | null; email: string | null; photoURL: string | null }) {
 		await this.updateGlobalState("userInfo", info)
 	}
-
 
 	/**
 	 * 遍历所有正在活跃的 ClineProvider 实例，并返回最后一个“视图”可见的实例。
@@ -252,7 +247,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	public static getVisibleInstance(): ClineProvider | undefined {
 		return findLast(Array.from(this.activeInstances), (instance) => instance.view?.visible === true)
 	}
-
 
 	/**
 	 * 【主线】解析和配置 VSCode 的 Webview 视图。
@@ -355,7 +349,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		this.outputChannel.appendLine("Webview view resolved")
 	}
 
-
 	/**
 	 * 【主线】使用指定的任务和可选的图片初始化 Cline 实例。
 	 * 该函数确保在启动新任务之前清除任何现有任务，然后获取必要的状态以创建新的 `Cline` 实例。
@@ -376,7 +369,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			images,
 		)
 	}
-
 
 	/**
 	 * 【主线】初始化带有历史项的 Cline 实例。
@@ -399,7 +391,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			historyItem,
 		)
 	}
-
 
 	// Send any JSON serializable data to the react app
 	/**
@@ -1228,7 +1219,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
-
 	/**
 	 * 更新全局状态中的自定义指令，并同步更新相关的 Cline 实例（如果存在）。
 	 * 最后，将更新后的状态发送到Webview。
@@ -1463,7 +1453,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 
 	// Auth
 
-
 	/**
 	 * 验证授权状态是否有效：查看传入的参数 授权状态 `state` 是否与存储的 `authNonce` 值匹配。
 	 * 如果匹配，则清除存储的 `authNonce` 并返回 `true`；否则返回 `false`。
@@ -1687,7 +1676,6 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 
 	// OpenAi
 
-
 	/**
 	 * 调用指定的 API 地址获取可用的 OpenAI 模型列表，并返回去重后的模型 ID 数组。
 	 * @param {string} [baseUrl] - OpenAI API 的基础地址，如果未提供则返回空数组。
@@ -1719,7 +1707,6 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 	}
 
 	// OpenRouter
-
 
 	/**
 	 * 处理 OpenRouter 的回调。在用户完成 OpenRouter 授权后，通过授权码获取 API 密钥并更新相关配置。
@@ -1903,7 +1890,6 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 
 	// Task history
 
-
 	/**
 	 * 根据任务ID获取任务相关的详细信息。
 	 *
@@ -1947,7 +1933,6 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 		throw new Error("Task not found")
 	}
 
-
 	/**
 	 * 根据给定的任务ID显示任务内容。
 	 * 如果任务ID与当前任务ID不同，则获取该任务的历史记录并初始化客户端。
@@ -1967,7 +1952,6 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 			action: "chatButtonClicked",
 		})
 	}
-
 
 	/**
 	 * 通过任务ID获取任务的历史记录和API对话历史，然后调用下载函数将任务数据导出。
@@ -2052,7 +2036,6 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 		this.refreshTotalTasksSize()
 	}
 
-
 	async deleteTaskFromState(id: string) {
 		// Remove the task from history
 		// 从全局状态中获取当前任务历史，如果不存在则初始化为空数组。
@@ -2112,7 +2095,6 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 			vscMachineId: vscode.env.machineId,
 		}
 	}
-
 
 	/**
 	 * 中止当前任务并清除对 cline 实例的引用。

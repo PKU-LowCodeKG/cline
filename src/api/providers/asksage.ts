@@ -10,9 +10,6 @@ import {
 } from "../../shared/api"
 import { ApiStream } from "../transform/stream"
 
-
-
-
 type AskSageRequest = {
 	system_prompt: string
 	message: {

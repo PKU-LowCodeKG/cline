@@ -73,7 +73,7 @@ const cwd = vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath
 type ToolResponse = string | Array<Anthropic.TextBlockParam | Anthropic.ImageBlockParam>
 type UserContent = Array<Anthropic.ContentBlockParam>
 
-export let globalStoragePath: any;
+export let globalStoragePath: any
 /**
  * Cline 类是 ClineProvider 的核心类。
  *
@@ -119,7 +119,7 @@ export class Cline {
 	didFinishAbortingStream = false
 	/**
 	 * 表示 Cline 实例是否被废弃。该变量只在 ClineProvider 的 cancelTask() 中被改为 true。
-	 * 说明 Cline 实例的生命周期完全和其绑定的任务一致。 
+	 * 说明 Cline 实例的生命周期完全和其绑定的任务一致。
 	 */
 	abandoned = false
 	private diffViewProvider: DiffViewProvider
@@ -231,7 +231,6 @@ export class Cline {
 	//    - 此外，只实现了 Gemini O1 openai 格式同 anthropic.message 相互转换的方法，但是在实际代码中并未调用这几个方法
 	// 4. 对于 LLM response，根据 `attemptApiRequest` 函数，Cline 会将 LLM response 转为 Anthropic.MessageParam[] 形式，存入 LLM API 对话历史（ApiConversationHistory 的维护）
 
-
 	/** 从 api_conversation_history.json 读取当前任务的 LLM API 对话历史数组 */
 	private async getSavedApiConversationHistory(): Promise<Anthropic.MessageParam[]> {
 		const filePath = path.join(await this.ensureTaskDirectoryExists(), GlobalFileNames.apiConversationHistory)
@@ -285,7 +284,6 @@ export class Cline {
 		return []
 	}
 
-
 	/** 将一条 ClineMessage 存入消息数组，并设置它对应的 API 对话索引（只在 ask 和 say 中调用） */
 	private async addToClineMessages(message: ClineMessage) {
 		// these values allow us to reconstruct the conversation history at the time this cline message was created
@@ -300,7 +298,6 @@ export class Cline {
 		this.clineMessages = newMessages
 		await this.saveClineMessages()
 	}
-
 
 	/**
 	 * 【Cline Message】更新当前 Cline 实例 绑定的 任务的 时间戳、API 消耗指标等
@@ -319,7 +316,7 @@ export class Cline {
 			// NOTE: 找到最后一个 不是“恢复任务”/“恢复已完成的任务” 的消息，用这个消息的时间戳作为 当前任务历史 的时间戳
 			const lastRelevantMessage =
 				this.clineMessages[
-				findLastIndex(this.clineMessages, (m) => !(m.ask === "resume_task" || m.ask === "resume_completed_task"))
+					findLastIndex(this.clineMessages, (m) => !(m.ask === "resume_task" || m.ask === "resume_completed_task"))
 				]
 			// NOTE: 计算 当前任务目录 tasks 的大小
 			let taskDirSize = 0
@@ -350,7 +347,6 @@ export class Cline {
 	// #endregion
 
 	// #region Checkpoint 的恢复和保存，用于实现 diff 功能
-
 
 	/**
 	 * 恢复到指定的时间点。
@@ -519,11 +515,11 @@ export class Cline {
 		/** 包含文件的相对路径 绝对路径 和在不同状态下的内容 */
 		let changedFiles:
 			| {
-				relativePath: string
-				absolutePath: string
-				before: string
-				after: string
-			}[]
+					relativePath: string
+					absolutePath: string
+					before: string
+					after: string
+			  }[]
 			| undefined
 
 		try {
@@ -674,7 +670,7 @@ export class Cline {
 	/**
 	 * 【主线】
 	 * Cline ask 用于向用户询问，在前端一般表现为 Cline wants to do sth (edit this file, execute this command, etc.)
-	 * 
+	 *
 	 * 【ask 和 say 的区别】 ask 在向用户询问后，使用 pWaitFor 库等待用户答复
 	 *
 	 * Cline askResponse 是用户在前端对 Cline ask 的回应：“接受”按钮、“拒绝”按钮、还是文本框输入答复。
@@ -912,7 +908,6 @@ export class Cline {
 		}
 	}
 
-
 	/**
 	 * 调用 Cline Say 方法，向用户展示 “工具调用时参数缺失” 的错误消息。
 	 * @param toolName 发生参数缺失的工具名称
@@ -923,12 +918,12 @@ export class Cline {
 	async sayAndCreateMissingParamError(toolName: ToolUseName, paramName: string, relPath?: string) {
 		await this.say(
 			"error",
-			`Cline tried to use ${toolName}${relPath ? ` for '${relPath.toPosix()}'` : ""
+			`Cline tried to use ${toolName}${
+				relPath ? ` for '${relPath.toPosix()}'` : ""
 			} without value for required parameter '${paramName}'. Retrying...`,
 		)
 		return formatResponse.toolError(formatResponse.missingToolParameterError(paramName))
 	}
-
 
 	/**
 	 * 如果当前 Cline 实例的 clineMessages 历史队列的最后一条消息 “不完整”，且其 ask 或 say 属性与提供的 askOrSay 参数相同，则：
@@ -946,7 +941,6 @@ export class Cline {
 	}
 
 	// Task lifecycle
-
 
 	// #region Cline 实例中 Task 的生命周期：开始新任务/恢复并继续旧任务、中断当前任务
 	/**
@@ -1112,11 +1106,11 @@ export class Cline {
 					const assistantContent = Array.isArray(previousAssistantMessage.content)
 						? previousAssistantMessage.content
 						: [
-							{
-								type: "text",
-								text: previousAssistantMessage.content,
-							},
-						]
+								{
+									type: "text",
+									text: previousAssistantMessage.content,
+								},
+							]
 
 					const toolUseBlocks = assistantContent.filter(
 						(block) => block.type === "tool_use",
@@ -1182,12 +1176,14 @@ export class Cline {
 		newUserContent.push({
 			type: "text",
 			text:
-				`[TASK RESUMPTION] ${this.chatSettings?.mode === "plan"
-					? `This task was interrupted ${agoText}. The conversation may have been incomplete. Be aware that the project state may have changed since then. The current working directory is now '${cwd.toPosix()}'.\n\nNote: If you previously attempted a tool use that the user did not provide a result for, you should assume the tool use was not successful. However you are in PLAN MODE, so rather than continuing the task, you must respond to the user's message.`
-					: `This task was interrupted ${agoText}. It may or may not be complete, so please reassess the task context. Be aware that the project state may have changed since then. The current working directory is now '${cwd.toPosix()}'. If the task has not been completed, retry the last step before interruption and proceed with completing the task.\n\nNote: If you previously attempted a tool use that the user did not provide a result for, you should assume the tool use was not successful and assess whether you should retry. If the last tool was a browser_action, the browser has been closed and you must launch a new browser if needed.`
-				}${wasRecent
-					? "\n\nIMPORTANT: If the last tool use was a replace_in_file or write_to_file that was interrupted, the file was reverted back to its original state before the interrupted edit, and you do NOT need to re-read the file as you already have its up-to-date contents."
-					: ""
+				`[TASK RESUMPTION] ${
+					this.chatSettings?.mode === "plan"
+						? `This task was interrupted ${agoText}. The conversation may have been incomplete. Be aware that the project state may have changed since then. The current working directory is now '${cwd.toPosix()}'.\n\nNote: If you previously attempted a tool use that the user did not provide a result for, you should assume the tool use was not successful. However you are in PLAN MODE, so rather than continuing the task, you must respond to the user's message.`
+						: `This task was interrupted ${agoText}. It may or may not be complete, so please reassess the task context. Be aware that the project state may have changed since then. The current working directory is now '${cwd.toPosix()}'. If the task has not been completed, retry the last step before interruption and proceed with completing the task.\n\nNote: If you previously attempted a tool use that the user did not provide a result for, you should assume the tool use was not successful and assess whether you should retry. If the last tool was a browser_action, the browser has been closed and you must launch a new browser if needed.`
+				}${
+					wasRecent
+						? "\n\nIMPORTANT: If the last tool use was a replace_in_file or write_to_file that was interrupted, the file was reverted back to its original state before the interrupted edit, and you do NOT need to re-read the file as you already have its up-to-date contents."
+						: ""
 				}` +
 				(responseText
 					? `\n\n${this.chatSettings?.mode === "plan" ? "New message to respond to with plan_mode_response tool (be sure to provide your response in the <response> parameter)" : "New instructions for task continuation"}:\n<user_message>\n${responseText}\n</user_message>`
@@ -1410,7 +1406,8 @@ export class Cline {
 			return [
 				true,
 				formatResponse.toolResult(
-					`Command is still running in the user's terminal.${result.length > 0 ? `\nHere's the output so far:\n${result}` : ""
+					`Command is still running in the user's terminal.${
+						result.length > 0 ? `\nHere's the output so far:\n${result}` : ""
 					}\n\nThe user provided the following feedback:\n<feedback>\n${userFeedback.text}\n</feedback>`,
 					userFeedback.images,
 				),
@@ -1422,12 +1419,12 @@ export class Cline {
 		} else {
 			return [
 				false,
-				`Command is still running in the user's terminal.${result.length > 0 ? `\nHere's the output so far:\n${result}` : ""
+				`Command is still running in the user's terminal.${
+					result.length > 0 ? `\nHere's the output so far:\n${result}` : ""
 				}\n\nYou will be updated on the terminal status and new output in the future.`,
 			]
 		}
 	}
-
 
 	/** 根据 用户自动批准 Cline 使用工具的 权限设置，将工具调用分为 5 种权限，并给出是否允许 */
 	shouldAutoApproveTool(toolName: ToolUseName): boolean {
@@ -1460,7 +1457,6 @@ export class Cline {
 		// Only prepend the statusCode if it's not already part of the message
 		return statusCode && !message.includes(statusCode.toString()) ? `${statusCode} - ${message}` : message
 	}
-
 
 	/**
 	 * 【主线】该函数是一个异步生成器函数，非常适合处理需要逐步获取的 API 数据流
@@ -1622,12 +1618,16 @@ export class Cline {
 
 		const ollamaMessages: Message[] = [
 			{ role: "system", content: systemPrompt },
-			...truncatedConversationHistory.map(msg => ({
+			...truncatedConversationHistory.map((msg) => ({
 				role: msg.role,
-				content: typeof msg.content === "string"
-					? msg.content
-					: msg.content.map(c => ('text' in c ? c.text : '')).filter(Boolean).join("\n")
-			}))
+				content:
+					typeof msg.content === "string"
+						? msg.content
+						: msg.content
+								.map((c) => ("text" in c ? c.text : ""))
+								.filter(Boolean)
+								.join("\n"),
+			})),
 		]
 		logMessages(ollamaMessages)
 
@@ -1770,8 +1770,9 @@ export class Cline {
 						case "replace_in_file":
 							return `[${block.name} for '${block.params.path}']`
 						case "search_files":
-							return `[${block.name} for '${block.params.regex}'${block.params.file_pattern ? ` in '${block.params.file_pattern}'` : ""
-								}]`
+							return `[${block.name} for '${block.params.regex}'${
+								block.params.file_pattern ? ` in '${block.params.file_pattern}'` : ""
+							}]`
 						case "list_files":
 							return `[${block.name} for '${block.params.path}']`
 						case "list_code_definition_names":
@@ -2047,7 +2048,7 @@ export class Cline {
 									await this.say("tool", partialMessage, undefined, block.partial)
 								} else {
 									this.removeLastPartialMessageIfExistsWithType("say", "tool")
-									await this.ask("tool", partialMessage, block.partial).catch(() => { })
+									await this.ask("tool", partialMessage, block.partial).catch(() => {})
 								}
 								// update editor
 								if (!this.diffViewProvider.isEditing) {
@@ -2088,7 +2089,7 @@ export class Cline {
 								if (!this.diffViewProvider.isEditing) {
 									// show gui message before showing edit animation
 									const partialMessage = JSON.stringify(sharedMessageProps)
-									await this.ask("tool", partialMessage, true).catch(() => { }) // sending true for partial even though it's not a partial, this shows the edit row before the content is streamed into the editor
+									await this.ask("tool", partialMessage, true).catch(() => {}) // sending true for partial even though it's not a partial, this shows the edit row before the content is streamed into the editor
 									await this.diffViewProvider.open(relPath)
 								}
 								await this.diffViewProvider.update(newContent, true)
@@ -2168,28 +2169,28 @@ export class Cline {
 									)
 									pushToolResult(
 										`The user made the following updates to your content:\n\n${userEdits}\n\n` +
-										(autoFormattingEdits
-											? `The user's editor also applied the following auto-formatting to your content:\n\n${autoFormattingEdits}\n\n(Note: Pay close attention to changes such as single quotes being converted to double quotes, semicolons being removed or added, long lines being broken into multiple lines, adjusting indentation style, adding/removing trailing commas, etc. This will help you ensure future SEARCH/REPLACE operations to this file are accurate.)\n\n`
-											: "") +
-										`The updated content, which includes both your original modifications and the additional edits, has been successfully saved to ${relPath.toPosix()}. Here is the full, updated content of the file that was saved:\n\n` +
-										`<final_file_content path="${relPath.toPosix()}">\n${finalContent}\n</final_file_content>\n\n` +
-										`Please note:\n` +
-										`1. You do not need to re-write the file with these changes, as they have already been applied.\n` +
-										`2. Proceed with the task using this updated file content as the new baseline.\n` +
-										`3. If the user's edits have addressed part of the task or changed the requirements, adjust your approach accordingly.` +
-										`4. IMPORTANT: For any future changes to this file, use the final_file_content shown above as your reference. This content reflects the current state of the file, including both user edits and any auto-formatting (e.g., if you used single quotes but the formatter converted them to double quotes). Always base your SEARCH/REPLACE operations on this final version to ensure accuracy.\n` +
-										`${newProblemsMessage}`,
+											(autoFormattingEdits
+												? `The user's editor also applied the following auto-formatting to your content:\n\n${autoFormattingEdits}\n\n(Note: Pay close attention to changes such as single quotes being converted to double quotes, semicolons being removed or added, long lines being broken into multiple lines, adjusting indentation style, adding/removing trailing commas, etc. This will help you ensure future SEARCH/REPLACE operations to this file are accurate.)\n\n`
+												: "") +
+											`The updated content, which includes both your original modifications and the additional edits, has been successfully saved to ${relPath.toPosix()}. Here is the full, updated content of the file that was saved:\n\n` +
+											`<final_file_content path="${relPath.toPosix()}">\n${finalContent}\n</final_file_content>\n\n` +
+											`Please note:\n` +
+											`1. You do not need to re-write the file with these changes, as they have already been applied.\n` +
+											`2. Proceed with the task using this updated file content as the new baseline.\n` +
+											`3. If the user's edits have addressed part of the task or changed the requirements, adjust your approach accordingly.` +
+											`4. IMPORTANT: For any future changes to this file, use the final_file_content shown above as your reference. This content reflects the current state of the file, including both user edits and any auto-formatting (e.g., if you used single quotes but the formatter converted them to double quotes). Always base your SEARCH/REPLACE operations on this final version to ensure accuracy.\n` +
+											`${newProblemsMessage}`,
 									)
 								} else {
 									pushToolResult(
 										`The content was successfully saved to ${relPath.toPosix()}.\n\n` +
-										(autoFormattingEdits
-											? `Along with your edits, the user's editor applied the following auto-formatting to your content:\n\n${autoFormattingEdits}\n\n(Note: Pay close attention to changes such as single quotes being converted to double quotes, semicolons being removed or added, long lines being broken into multiple lines, adjusting indentation style, adding/removing trailing commas, etc. This will help you ensure future SEARCH/REPLACE operations to this file are accurate.)\n\n`
-											: "") +
-										`Here is the full, updated content of the file that was saved:\n\n` +
-										`<final_file_content path="${relPath.toPosix()}">\n${finalContent}\n</final_file_content>\n\n` +
-										`IMPORTANT: For any future changes to this file, use the final_file_content shown above as your reference. This content reflects the current state of the file, including any auto-formatting (e.g., if you used single quotes but the formatter converted them to double quotes). Always base your SEARCH/REPLACE operations on this final version to ensure accuracy.\n\n` +
-										`${newProblemsMessage}`,
+											(autoFormattingEdits
+												? `Along with your edits, the user's editor applied the following auto-formatting to your content:\n\n${autoFormattingEdits}\n\n(Note: Pay close attention to changes such as single quotes being converted to double quotes, semicolons being removed or added, long lines being broken into multiple lines, adjusting indentation style, adding/removing trailing commas, etc. This will help you ensure future SEARCH/REPLACE operations to this file are accurate.)\n\n`
+												: "") +
+											`Here is the full, updated content of the file that was saved:\n\n` +
+											`<final_file_content path="${relPath.toPosix()}">\n${finalContent}\n</final_file_content>\n\n` +
+											`IMPORTANT: For any future changes to this file, use the final_file_content shown above as your reference. This content reflects the current state of the file, including any auto-formatting (e.g., if you used single quotes but the formatter converted them to double quotes). Always base your SEARCH/REPLACE operations on this final version to ensure accuracy.\n\n` +
+											`${newProblemsMessage}`,
 									)
 								}
 
@@ -2228,7 +2229,7 @@ export class Cline {
 									await this.say("tool", partialMessage, undefined, block.partial)
 								} else {
 									this.removeLastPartialMessageIfExistsWithType("say", "tool")
-									await this.ask("tool", partialMessage, block.partial).catch(() => { })
+									await this.ask("tool", partialMessage, block.partial).catch(() => {})
 								}
 								break
 							} else {
@@ -2301,7 +2302,7 @@ export class Cline {
 									await this.say("tool", partialMessage, undefined, block.partial)
 								} else {
 									this.removeLastPartialMessageIfExistsWithType("say", "tool")
-									await this.ask("tool", partialMessage, block.partial).catch(() => { })
+									await this.ask("tool", partialMessage, block.partial).catch(() => {})
 								}
 								break
 							} else {
@@ -2374,7 +2375,7 @@ export class Cline {
 									await this.say("tool", partialMessage, undefined, block.partial)
 								} else {
 									this.removeLastPartialMessageIfExistsWithType("say", "tool")
-									await this.ask("tool", partialMessage, block.partial).catch(() => { })
+									await this.ask("tool", partialMessage, block.partial).catch(() => {})
 								}
 								break
 							} else {
@@ -2448,7 +2449,7 @@ export class Cline {
 									await this.say("tool", partialMessage, undefined, block.partial)
 								} else {
 									this.removeLastPartialMessageIfExistsWithType("say", "tool")
-									await this.ask("tool", partialMessage, block.partial).catch(() => { })
+									await this.ask("tool", partialMessage, block.partial).catch(() => {})
 								}
 								break
 							} else {
@@ -2539,7 +2540,7 @@ export class Cline {
 											"browser_action_launch",
 											removeClosingTag("url", url),
 											block.partial,
-										).catch(() => { })
+										).catch(() => {})
 									}
 								} else {
 									await this.say(
@@ -2647,7 +2648,8 @@ export class Cline {
 										await this.say("browser_action_result", JSON.stringify(browserActionResult))
 										pushToolResult(
 											formatResponse.toolResult(
-												`The browser action has been executed. The console logs and screenshot have been captured for your analysis.\n\nConsole logs:\n${browserActionResult.logs || "(No new logs)"
+												`The browser action has been executed. The console logs and screenshot have been captured for your analysis.\n\nConsole logs:\n${
+													browserActionResult.logs || "(No new logs)"
 												}\n\n(REMEMBER: if you need to proceed to using non-\`browser_action\` tools or launch a new browser, you MUST first close this browser. For example, if after analyzing the logs and screenshot you need to edit a file, you must first close the browser before you can use the write_to_file tool.)`,
 												browserActionResult.screenshot ? [browserActionResult.screenshot] : [],
 											),
@@ -2690,7 +2692,7 @@ export class Cline {
 									// ).catch(() => {})
 								} else {
 									// don't need to remove last partial since we couldn't have streamed a say
-									await this.ask("command", removeClosingTag("command", command), block.partial).catch(() => { })
+									await this.ask("command", removeClosingTag("command", command), block.partial).catch(() => {})
 								}
 								break
 							} else {
@@ -2735,7 +2737,7 @@ export class Cline {
 									const didApprove = await askApproval(
 										"command",
 										command +
-										`${this.shouldAutoApproveTool(block.name) && requiresApproval ? COMMAND_REQ_APP_STRING : ""}`, // ugly hack until we refactor combineCommandSequences
+											`${this.shouldAutoApproveTool(block.name) && requiresApproval ? COMMAND_REQ_APP_STRING : ""}`, // ugly hack until we refactor combineCommandSequences
 									)
 									if (!didApprove) {
 										break
@@ -2795,7 +2797,7 @@ export class Cline {
 									await this.say("use_mcp_server", partialMessage, undefined, block.partial)
 								} else {
 									this.removeLastPartialMessageIfExistsWithType("say", "use_mcp_server")
-									await this.ask("use_mcp_server", partialMessage, block.partial).catch(() => { })
+									await this.ask("use_mcp_server", partialMessage, block.partial).catch(() => {})
 								}
 
 								break
@@ -2874,19 +2876,19 @@ export class Cline {
 								// TODO: add progress indicator and ability to parse images and non-text responses
 								const toolResultPretty =
 									(toolResult?.isError ? "Error:\n" : "") +
-									toolResult?.content
-										.map((item) => {
-											if (item.type === "text") {
-												return item.text
-											}
-											if (item.type === "resource") {
-												const { blob, ...rest } = item.resource
-												return JSON.stringify(rest, null, 2)
-											}
-											return ""
-										})
-										.filter(Boolean)
-										.join("\n\n") || "(No response)"
+										toolResult?.content
+											.map((item) => {
+												if (item.type === "text") {
+													return item.text
+												}
+												if (item.type === "resource") {
+													const { blob, ...rest } = item.resource
+													return JSON.stringify(rest, null, 2)
+												}
+												return ""
+											})
+											.filter(Boolean)
+											.join("\n\n") || "(No response)"
 								await this.say("mcp_server_response", toolResultPretty)
 								pushToolResult(formatResponse.toolResult(toolResultPretty))
 
@@ -2916,7 +2918,7 @@ export class Cline {
 									await this.say("use_mcp_server", partialMessage, undefined, block.partial)
 								} else {
 									this.removeLastPartialMessageIfExistsWithType("say", "use_mcp_server")
-									await this.ask("use_mcp_server", partialMessage, block.partial).catch(() => { })
+									await this.ask("use_mcp_server", partialMessage, block.partial).catch(() => {})
 								}
 
 								break
@@ -3094,9 +3096,9 @@ export class Cline {
 									pushToolResult(
 										formatResponse.toolResult(
 											`[The user has switched to ACT MODE, so you may now proceed with the task.]` +
-											(text
-												? `\n\nThe user also provided the following message when switching to ACT MODE:\n<user_message>\n${text}\n</user_message>`
-												: ""),
+												(text
+													? `\n\nThe user also provided the following message when switching to ACT MODE:\n<user_message>\n${text}\n</user_message>`
+													: ""),
 											images,
 										),
 									)
@@ -3166,7 +3168,7 @@ export class Cline {
 									if (lastMessage && lastMessage.ask === "command") {
 										// update command
 										await this.ask("command", removeClosingTag("command", command), block.partial).catch(
-											() => { },
+											() => {},
 										)
 									} else {
 										// last message is completion_result
@@ -3175,7 +3177,7 @@ export class Cline {
 										await this.saveCheckpoint(true)
 										await addNewChangesFlagToLastCompletionResultMessage()
 										await this.ask("command", removeClosingTag("command", command), block.partial).catch(
-											() => { },
+											() => {},
 										)
 									}
 								} else {
@@ -3310,7 +3312,6 @@ export class Cline {
 			this.presentAssistantMessage()
 		}
 	}
-
 
 	/**
 	 * 【主线】递归地发出 Cline 请求。一些值得注意的点：
@@ -3504,9 +3505,10 @@ export class Cline {
 							type: "text",
 							text:
 								assistantMessage +
-								`\n\n[${cancelReason === "streaming_failed"
-									? "Response interrupted by API Error"
-									: "Response interrupted by user"
+								`\n\n[${
+									cancelReason === "streaming_failed"
+										? "Response interrupted by API Error"
+										: "Response interrupted by user"
 								}]`,
 						},
 					],
@@ -3736,7 +3738,6 @@ export class Cline {
 		}
 	}
 
-
 	/**
 	 * 【主线】识别当前 userContent 数组中 mentions（@），并解析它们。
 	 * 返回：
@@ -3778,7 +3779,6 @@ export class Cline {
 			this.getEnvironmentDetails(includeFileDetails),
 		])
 	}
-
 
 	/**
 	 * 【主线】收集、生成当前开发环境的详细信息，并返回。这个函数返回的文本用于 LLM API 对话
@@ -3855,7 +3855,7 @@ export class Cline {
 			await pWaitFor(() => busyTerminals.every((t) => !this.terminalManager.isProcessHot(t.id)), {
 				interval: 100,
 				timeout: 15_000,
-			}).catch(() => { })
+			}).catch(() => {})
 		}
 
 		// we want to get diagnostics AFTER terminal cools down for a few reasons: terminal could be scaffolding a project, dev servers (compilers like webpack) will first re-compile and then send diagnostics, etc
