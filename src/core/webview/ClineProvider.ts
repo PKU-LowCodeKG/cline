@@ -37,6 +37,8 @@ import { TelemetrySetting } from "../../shared/TelemetrySetting"
 import { cleanupLegacyCheckpoints } from "../../integrations/checkpoints/CheckpointMigration"
 import CheckpointTracker from "../../integrations/checkpoints/CheckpointTracker"
 import { getTotalTasksSize } from "../../utils/storage"
+import { ConversationTelemetryService } from "../../services/telemetry/ConversationTelemetryService"
+import { GlobalFileNames } from "../../global-constants"
 
 /*
 https://github.com/microsoft/vscode-webview-ui-toolkit-samples/blob/main/default/weather-webview/src/providers/WeatherViewProvider.ts
@@ -116,27 +118,6 @@ type GlobalStateKey =
 	| "planActSeparateModelsSetting"
 
 /**
- * Cline 的全局文件名
- * 1. 在 Windows 上，`context.globalStorageUri.fsPath` 为：
- * `C:\Users\<你的用户名>\AppData\Roaming\Code\User\globalStorage\<发布者名称>.<扩展名>`
- * 2. 在 Linux 上，`context.globalStorageUri.fsPath` 为：
- * `/home/<你的用户名>/.config/Code/User/globalStorage/<发布者名称>.<扩展名>`
- *
- * Cline 的<发布者名称>.<扩展名> 为 saoudrizwan.claude-dev
- */
-export const GlobalFileNames = {
-	/** 存放 LLM API 对话历史记录（均以 Anthropic API 形式存放） */
-	apiConversationHistory: "api_conversation_history.json",
-	/** 存放 Cline Message，用于插件 webview UI 显示 */
-	uiMessages: "ui_messages.json",
-	/** 存放 openrouter 的 LLM API 信息 */
-	openRouterModels: "openrouter_models.json",
-	/** 存放 Cline 的 MCP 设置文件 */
-	mcpSettings: "cline_mcp_settings.json",
-	clineRules: ".clinerules",
-}
-
-/**
  * ClineProvider 实现了 vscode.WebviewViewProvider 接口，是 Cline 前后端服务的桥梁：
  * 1. 创建插件的 Webview 视图。
  * 2. 管理 Cline 实例的状态（只会存在一个）
@@ -158,6 +139,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	workspaceTracker?: WorkspaceTracker
 	mcpHub?: McpHub
 	private latestAnnouncementId = "feb-19-2025" // update to some unique identifier when we add a new announcement
+	conversationTelemetryService: ConversationTelemetryService
 
 	/**
 	 * 构造函数用于初始化ClineProvider实例及其核心组件
@@ -176,6 +158,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		ClineProvider.activeInstances.add(this)
 		this.workspaceTracker = new WorkspaceTracker(this)
 		this.mcpHub = new McpHub(this)
+		this.conversationTelemetryService = new ConversationTelemetryService(this)
 
 		// Clean up legacy checkpoints
 		cleanupLegacyCheckpoints(this.context.globalStorageUri.fsPath, this.outputChannel).catch((error) => {
@@ -219,6 +202,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		// 释放 mcpHub 并设置为 undefined
 		this.mcpHub?.dispose()
 		this.mcpHub = undefined
+		this.conversationTelemetryService.shutdown()
 		this.outputChannel.appendLine("Disposed all disposables")
 
 		// 从活动实例集合中删除当前实例
