@@ -115,8 +115,11 @@ export async function parseMentions(
 		}
 	}
 
+	// Filter out duplicate mentions while preserving order
+	const uniqueMentions = Array.from(new Set(mentions))
+
 	// 遍历所有的 mention，为每个 mention 补充一些详细信息
-	for (const mention of mentions) {
+	for (const mention of uniqueMentions) {
 		// 如果提及内容是一个 URL（插件前端 @URL）
 		if (mention.startsWith("http")) {
 			let result: string
