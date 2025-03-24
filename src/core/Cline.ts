@@ -67,7 +67,7 @@ import { telemetryService } from "../services/telemetry/TelemetryService"
 import { ConversationTelemetryService, TelemetryChatMessage } from "../services/telemetry/ConversationTelemetryService"
 import pTimeout from "p-timeout"
 import { GlobalFileNames } from "../global-constants"
-import { ensureTaskDirectoryExists } from "./messages-io"
+import { checkIsOpenRouterContextWindowError } from "./context-management/context-error-handling"
 
 import { logOutput, logMessages } from "./prompts/show_prompt"
 import { Message } from "ollama"
@@ -225,14 +225,19 @@ export class Cline {
 	//    - 此外，只实现了 Gemini O1 openai 格式同 anthropic.message 相互转换的方法，但是在实际代码中并未调用这几个方法
 	// 4. 对于 LLM response，根据 `attemptApiRequest` 函数，Cline 会将 LLM response 转为 Anthropic.MessageParam[] 形式，存入 LLM API 对话历史（ApiConversationHistory 的维护）
 
+	private async ensureTaskDirectoryExists(): Promise<string> {
+		const globalStoragePath = this.providerRef.deref()?.context.globalStorageUri.fsPath
+		if (!globalStoragePath) {
+			throw new Error("Global storage uri is invalid")
+		}
+		const taskDir = path.join(globalStoragePath, "tasks", this.taskId)
+		await fs.mkdir(taskDir, { recursive: true })
+		return taskDir
+	}
+
 	/** 从 api_conversation_history.json 读取当前任务的 LLM API 对话历史数组 */
 	private async getSavedApiConversationHistory(): Promise<Anthropic.MessageParam[]> {
-		const globalStoragePath = this.providerRef.deref()?.context.globalStorageUri.fsPath
-		const taskId = this.taskId
-		const filePath = path.join(
-			await ensureTaskDirectoryExists(globalStoragePath, taskId),
-			GlobalFileNames.apiConversationHistory,
-		)
+		const filePath = path.join(await this.ensureTaskDirectoryExists(), GlobalFileNames.apiConversationHistory)
 		const fileExists = await fileExistsAtPath(filePath)
 		if (fileExists) {
 			return JSON.parse(await fs.readFile(filePath, "utf8"))
@@ -255,12 +260,7 @@ export class Cline {
 	/** 保存当前任务的 API 对话历史到 api_conversation_history.json 文件 */
 	private async saveApiConversationHistory() {
 		try {
-			const globalStoragePath = this.providerRef.deref()?.context.globalStorageUri.fsPath
-			const taskId = this.taskId
-			const filePath = path.join(
-				await ensureTaskDirectoryExists(globalStoragePath, taskId),
-				GlobalFileNames.apiConversationHistory,
-			)
+			const filePath = path.join(await this.ensureTaskDirectoryExists(), GlobalFileNames.apiConversationHistory)
 			await fs.writeFile(filePath, JSON.stringify(this.apiConversationHistory))
 		} catch (error) {
 			// in the off chance this fails, we don't want to stop the task
@@ -273,14 +273,12 @@ export class Cline {
 
 	/** 读取 uiMessages 文件中记录的 Cline Message 数组，只在 `resumeTaskFromHistory()` 中使用  */
 	private async getSavedClineMessages(): Promise<ClineMessage[]> {
-		const globalStoragePath = this.providerRef.deref()?.context.globalStorageUri.fsPath
-		const taskId = this.taskId
-		const filePath = path.join(await ensureTaskDirectoryExists(globalStoragePath, taskId), GlobalFileNames.uiMessages)
+		const filePath = path.join(await this.ensureTaskDirectoryExists(), GlobalFileNames.uiMessages)
 		if (await fileExistsAtPath(filePath)) {
 			return JSON.parse(await fs.readFile(filePath, "utf8"))
 		} else {
 			// check old location
-			const oldPath = path.join(await ensureTaskDirectoryExists(globalStoragePath, taskId), "claude_messages.json")
+			const oldPath = path.join(await this.ensureTaskDirectoryExists(), "claude_messages.json")
 			if (await fileExistsAtPath(oldPath)) {
 				const data = JSON.parse(await fs.readFile(oldPath, "utf8"))
 				await fs.unlink(oldPath) // remove old file
@@ -312,9 +310,7 @@ export class Cline {
 	 */
 	private async saveClineMessages() {
 		try {
-			const globalStoragePath = this.providerRef.deref()?.context.globalStorageUri.fsPath
-			const taskId = this.taskId
-			const taskDir = await ensureTaskDirectoryExists(globalStoragePath, taskId)
+			const taskDir = await this.ensureTaskDirectoryExists()
 			const filePath = path.join(taskDir, GlobalFileNames.uiMessages)
 			await fs.writeFile(filePath, JSON.stringify(this.clineMessages))
 			// combined as they are in ChatView
@@ -1669,20 +1665,48 @@ export class Cline {
 			this.isWaitingForFirstChunk = false
 		} catch (error) {
 			const isOpenRouter = this.api instanceof OpenRouterHandler || this.api instanceof ClineHandler
+			const isOpenRouterContextWindowError = checkIsOpenRouterContextWindowError(error) && isOpenRouter
+
 			if (isOpenRouter && !this.didAutomaticallyRetryFailedApiRequest) {
+				if (isOpenRouterContextWindowError) {
+					this.conversationHistoryDeletedRange = this.contextManager.getNextTruncationRange(
+						this.apiConversationHistory,
+						this.conversationHistoryDeletedRange,
+						"quarter", // Force aggressive truncation
+					)
+					await this.saveClineMessages()
+				}
+
 				console.log("first chunk failed, waiting 1 second before retrying")
 				await delay(1000)
 				this.didAutomaticallyRetryFailedApiRequest = true
 			} else {
 				// request failed after retrying automatically once, ask user if they want to retry again
 				// note that this api_req_failed ask is unique in that we only present this option if the api hasn't streamed any content yet (ie it fails on the first chunk due), as it would allow them to hit a retry button. However if the api failed mid-stream, it could be in any arbitrary state where some tools may have executed, so that error is handled differently and requires cancelling the task entirely.
+
+				if (isOpenRouterContextWindowError) {
+					const truncatedConversationHistory = this.contextManager.getTruncatedMessages(
+						this.apiConversationHistory,
+						this.conversationHistoryDeletedRange,
+					)
+
+					// If the conversation has more than 3 messages, we can truncate again. If not, then the conversation is bricked.
+					// ToDo: Allow the user to change their input if this is the case.
+					if (truncatedConversationHistory.length > 3) {
+						error = new Error("Context window exceeded. Click retry to truncate the conversation and try again.")
+						this.didAutomaticallyRetryFailedApiRequest = false
+					}
+				}
+
 				const errorMessage = this.formatErrorWithStatusCode(error)
 
 				const { response } = await this.ask("api_req_failed", errorMessage)
+
 				if (response !== "yesButtonClicked") {
 					// this will never happen since if noButtonClicked, we will clear current task, aborting this instance
 					throw new Error("API request failed")
 				}
+
 				await this.say("api_req_retried")
 			}
 			// delegate generator output from the recursive call
@@ -2307,6 +2331,7 @@ export class Cline {
 							break
 						}
 					}
+					// "list_files" 工具的逻辑和 <environment_detail> 中的 includeFileDetails 为 true 的逻辑完全一致，格式化字符串为；formatResponse.formatFilesList
 					case "list_files": {
 						const relDirPath: string | undefined = block.params.path
 						const recursiveRaw: string | undefined = block.params.recursive
