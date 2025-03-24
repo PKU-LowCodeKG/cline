@@ -1,7 +1,6 @@
 import fs from "fs"
 import path from "path"
 import { Message } from "ollama"
-import { ApiStream } from "../../api/transform/stream"
 import { globalStoragePath } from "../Cline"
 
 let interactionCount = 0

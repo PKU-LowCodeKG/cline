@@ -2331,6 +2331,7 @@ export class Cline {
 							break
 						}
 					}
+					// "list_files" 工具的逻辑和 <environment_detail> 中的 includeFileDetails 为 true 的逻辑完全一致，格式化字符串为；formatResponse.formatFilesList
 					case "list_files": {
 						const relDirPath: string | undefined = block.params.path
 						const recursiveRaw: string | undefined = block.params.recursive
