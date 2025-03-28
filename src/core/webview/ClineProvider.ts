@@ -206,7 +206,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		this.mcpHub?.dispose()
 		this.mcpHub = undefined
 		this.accountService = undefined
-		this.conversationObservabilityService.shutdown()
 		this.outputChannel.appendLine("Disposed all disposables")
 
 		// 从活动实例集合中删除当前实例
