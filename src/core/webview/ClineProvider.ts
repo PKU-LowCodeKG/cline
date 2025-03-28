@@ -38,9 +38,8 @@ import { TelemetrySetting } from "../../shared/TelemetrySetting"
 import { cleanupLegacyCheckpoints } from "../../integrations/checkpoints/CheckpointMigration"
 import CheckpointTracker from "../../integrations/checkpoints/CheckpointTracker"
 import { getTotalTasksSize } from "../../utils/storage"
-import { ConversationTelemetryService } from "../../services/telemetry/ConversationTelemetryService"
 import { GlobalFileNames } from "../../global-constants"
-import delay from "delay"
+import { setTimeout as setTimeoutPromise } from "node:timers/promises"
 
 /*
 https://github.com/microsoft/vscode-webview-ui-toolkit-samples/blob/main/default/weather-webview/src/providers/WeatherViewProvider.ts
@@ -103,6 +102,7 @@ type GlobalStateKey =
 	| "previousModeApiProvider"
 	| "previousModeModelId"
 	| "previousModeThinkingBudgetTokens"
+	| "previousModeVsCodeLmModelSelector"
 	| "previousModeModelInfo"
 	| "liteLlmBaseUrl"
 	| "liteLlmModelId"
@@ -126,7 +126,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	mcpHub?: McpHub
 	accountService?: ClineAccountService
 	private latestAnnouncementId = "march-22-2025" // update to some unique identifier when we add a new announcement
-	conversationTelemetryService: ConversationTelemetryService
 
 	constructor(
 		readonly context: vscode.ExtensionContext,
@@ -137,7 +136,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		this.workspaceTracker = new WorkspaceTracker(this)
 		this.mcpHub = new McpHub(this)
 		this.accountService = new ClineAccountService(this)
-		this.conversationTelemetryService = new ConversationTelemetryService(this)
 
 		// Clean up legacy checkpoints
 		cleanupLegacyCheckpoints(this.context.globalStorageUri.fsPath, this.outputChannel).catch((error) => {
@@ -169,7 +167,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		this.mcpHub?.dispose()
 		this.mcpHub = undefined
 		this.accountService = undefined
-		this.conversationTelemetryService.shutdown()
+		this.conversationObservabilityService.shutdown()
 		this.outputChannel.appendLine("Disposed all disposables")
 		ClineProvider.activeInstances.delete(this)
 	}
@@ -964,6 +962,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			previousModeApiProvider: newApiProvider,
 			previousModeModelId: newModelId,
 			previousModeModelInfo: newModelInfo,
+			previousModeVsCodeLmModelSelector: newVsCodeLmModelSelector,
 			previousModeThinkingBudgetTokens: newThinkingBudgetTokens,
 			planActSeparateModelsSetting,
 		} = await this.getState()
@@ -991,7 +990,8 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 					await this.updateGlobalState("previousModeModelInfo", apiConfiguration.openRouterModelInfo)
 					break
 				case "vscode-lm":
-					await this.updateGlobalState("previousModeModelId", apiConfiguration.vsCodeLmModelSelector)
+					// Important we don't set modelId to this, as it's an object not string (webview expects model id to be a string)
+					await this.updateGlobalState("previousModeVsCodeLmModelSelector", apiConfiguration.vsCodeLmModelSelector)
 					break
 				case "openai":
 					await this.updateGlobalState("previousModeModelId", apiConfiguration.openAiModelId)
@@ -1012,7 +1012,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 			}
 
 			// Restore the model used in previous mode
-			if (newApiProvider || newModelId || newThinkingBudgetTokens !== undefined) {
+			if (newApiProvider || newModelId || newThinkingBudgetTokens !== undefined || newVsCodeLmModelSelector) {
 				await this.updateGlobalState("apiProvider", newApiProvider)
 				await this.updateGlobalState("thinkingBudgetTokens", newThinkingBudgetTokens)
 				switch (newApiProvider) {
@@ -1032,7 +1032,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						await this.updateGlobalState("openRouterModelInfo", newModelInfo)
 						break
 					case "vscode-lm":
-						await this.updateGlobalState("vsCodeLmModelSelector", newModelId)
+						await this.updateGlobalState("vsCodeLmModelSelector", newVsCodeLmModelSelector)
 						break
 					case "openai":
 						await this.updateGlobalState("openAiModelId", newModelId)
@@ -1764,7 +1764,7 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 	async addSelectedCodeToChat(code: string, filePath: string, languageId: string, diagnostics?: vscode.Diagnostic[]) {
 		// Ensure the sidebar view is visible
 		await vscode.commands.executeCommand("claude-dev.SidebarProvider.focus")
-		await delay(100)
+		await setTimeoutPromise(100)
 
 		// Post message to webview with the selected code
 		const fileMention = this.getFileMentionFromPath(filePath)
@@ -1787,7 +1787,7 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 	async addSelectedTerminalOutputToChat(output: string, terminalName: string) {
 		// Ensure the sidebar view is visible
 		await vscode.commands.executeCommand("claude-dev.SidebarProvider.focus")
-		await delay(100)
+		await setTimeoutPromise(100)
 
 		// Post message to webview with the selected terminal output
 		// await this.postMessageToWebview({
@@ -1808,7 +1808,7 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 	async fixWithCline(code: string, filePath: string, languageId: string, diagnostics: vscode.Diagnostic[]) {
 		// Ensure the sidebar view is visible
 		await vscode.commands.executeCommand("claude-dev.SidebarProvider.focus")
-		await delay(100)
+		await setTimeoutPromise(100)
 
 		const fileMention = this.getFileMentionFromPath(filePath)
 		const problemsString = this.convertDiagnosticsToProblemsString(diagnostics)
@@ -2133,6 +2133,7 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 			previousModeApiProvider,
 			previousModeModelId,
 			previousModeModelInfo,
+			previousModeVsCodeLmModelSelector,
 			previousModeThinkingBudgetTokens,
 			qwenApiLine,
 			liteLlmApiKey,
@@ -2196,6 +2197,7 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 			this.getGlobalState("previousModeApiProvider") as Promise<ApiProvider | undefined>,
 			this.getGlobalState("previousModeModelId") as Promise<string | undefined>,
 			this.getGlobalState("previousModeModelInfo") as Promise<ModelInfo | undefined>,
+			this.getGlobalState("previousModeVsCodeLmModelSelector") as Promise<vscode.LanguageModelChatSelector | undefined>,
 			this.getGlobalState("previousModeThinkingBudgetTokens") as Promise<number | undefined>,
 			this.getGlobalState("qwenApiLine") as Promise<string | undefined>,
 			this.getSecret("liteLlmApiKey") as Promise<string | undefined>,
@@ -2285,8 +2287,7 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 				qwenApiLine,
 				mistralApiKey,
 				azureApiVersion,
-				// Fixes bug where switching to plan/act would result in setting this model id to previousModeModelId which may have been a non-string value by default, causing a type error in the webview when calling .toLowerCase() on it.
-				openRouterModelId: openRouterModelId ? String(openRouterModelId) : undefined,
+				openRouterModelId,
 				openRouterModelInfo,
 				openRouterProviderSorting,
 				vsCodeLmModelSelector,
@@ -2308,8 +2309,9 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 			chatSettings: chatSettings || DEFAULT_CHAT_SETTINGS,
 			userInfo,
 			previousModeApiProvider,
-			previousModeModelId: previousModeModelId ? String(previousModeModelId) : undefined,
+			previousModeModelId,
 			previousModeModelInfo,
+			previousModeVsCodeLmModelSelector,
 			previousModeThinkingBudgetTokens,
 			mcpMarketplaceEnabled,
 			telemetrySetting: telemetrySetting || "unset",
