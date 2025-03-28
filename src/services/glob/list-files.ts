@@ -11,6 +11,7 @@ import { arePathsEqual } from "../../utils/path"
  * @returns 返回一个包含两个元素的数组：第一个元素是找到的文件路径列表，第二个是一个布尔值，表示是否达到了限制数量。
  */
 export async function listFiles(dirPath: string, recursive: boolean, limit: number): Promise<[string[], boolean]> {
+	// First resolve the path normally - path.resolve doesn't care about glob special characters
 	const absolutePath = path.resolve(dirPath)
 	// Do not allow listing files in root or home directory, which cline tends to want to do when the user's prompt is vague.
 	// 防止列出根目录或用户主目录下的文件，这是 cline 倾向于在 user's prompt 模糊时要做的事情。
@@ -56,6 +57,7 @@ export async function listFiles(dirPath: string, recursive: boolean, limit: numb
 	}
 
 	// * globs all files in one dir, ** globs files in nested directories
+	// For non-recursive listing, we still use a simple pattern
 	const filePaths = recursive ? await globbyLevelByLevel(limit, options) : (await globby("*", options)).slice(0, limit)
 
 	return [filePaths, filePaths.length >= limit]
@@ -88,7 +90,11 @@ async function globbyLevelByLevel(limit: number, options?: Options) {
 				}
 				results.add(file)
 				if (file.endsWith("/")) {
-					queue.push(`${file}*`)
+					// Escape parentheses in the path to prevent glob pattern interpretation
+					// This is crucial for NextJS folder naming conventions which use parentheses like (auth), (dashboard)
+					// Without escaping, glob treats parentheses as special pattern grouping characters
+					const escapedFile = file.replace(/\(/g, "\\(").replace(/\)/g, "\\)")
+					queue.push(`${escapedFile}*`)
 				}
 			}
 		}
