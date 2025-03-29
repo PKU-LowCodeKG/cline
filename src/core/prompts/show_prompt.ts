@@ -1,6 +1,20 @@
 import fs from "fs"
 import path from "path"
-import { Message } from "ollama"
+
+export interface Message {
+    role: string;
+    content: string;
+    images?: Uint8Array[] | string[];
+    tool_calls?: ToolCall[];
+}
+interface ToolCall {
+    function: {
+        name: string;
+        arguments: {
+            [key: string]: any;
+        };
+    };
+}
 
 let interactionCount = 0
 let currentLogFile = ""
