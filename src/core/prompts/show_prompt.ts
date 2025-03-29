@@ -44,9 +44,10 @@ export function logMessages(messages: Message[]) {
                 top: 0;
                 left: 0;
                 width: 200px;
-                height: 100vh;
+                height: 90vh;
                 background: white;
                 padding: 20px;
+                padding-bottom: 100px; /* Add extra padding at the bottom */
                 box-shadow: 2px 0 5px rgba(0,0,0,0.1);
                 overflow-y: auto;
             }
@@ -243,11 +244,11 @@ export function logOutput(outputBuffer: string = "") {
     // Replace entire navigation content and add output section
     const updatedContent = existingContent
         .replace(
-            `</ul>`,
+            /<\/ul>(?!.*<\/ul>)/,  // Matches last </ul>
             `\n<li class="sub-nav"><a href="#output-${interactionCount}">Output</a></li></ul>`
         )
         .replace(
-            '</body>',
+            /<\/body>(?!.*<\/body>)/,  // Matches last </body>
             `
             <div>
                 <h2 id="output-${interactionCount}">Output</h2>
