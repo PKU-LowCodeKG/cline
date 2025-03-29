@@ -22,7 +22,7 @@ const generateTOC = (messages: Message[]) => {
 	return titles.join("\n")
 }
 
-export function logMessages(messages: Message[], globalStoragePath: string) {
+export function logMessages(messages: Message[], globalStoragePath2: any) {
 	interactionCount++
 
 	// 添加新的CSS样式到styles中
@@ -202,7 +202,7 @@ export function logMessages(messages: Message[], globalStoragePath: string) {
 			})
 			.replace(/[\/:]/g, "-")
 
-		const logDir = path.join(globalStoragePath, "log")
+		const logDir = path.join(globalStoragePath?globalStoragePath:globalStoragePath2, "log")
 		if (!fs.existsSync(logDir)) {
 			fs.mkdirSync(logDir, { recursive: true })
 		}
