@@ -71,7 +71,6 @@ import {
 	checkIsOpenRouterContextWindowError,
 } from "./context-management/context-error-handling"
 import { AnthropicHandler } from "../api/providers/anthropic"
-
 import { logOutput, logMessages } from "./prompts/show_prompt"
 import { Message } from "ollama"
 
@@ -97,6 +96,7 @@ export class Cline {
 	private urlContentFetcher: UrlContentFetcher
 	browserSession: BrowserSession
 	contextManager: ContextManager
+	/** 当前 Cline 实例的任务是否已经编辑过文件 */
 	private didEditFile: boolean = false
 	/** Cline 的自定义指令，只在构造函数中读入 */
 	customInstructions?: string
@@ -1564,8 +1564,6 @@ export class Cline {
 				preferredLanguageInstructions,
 			)
 		}
-
-		// 5. 如果之前的 API 请求的 token 使用量接近上下文窗口的最大值，则截断对话历史记录，以便为新请求腾出空间。
 		const contextManagementMetadata = this.contextManager.getNewContextMessagesAndMetadata(
 			this.apiConversationHistory,
 			this.clineMessages,
@@ -1578,11 +1576,9 @@ export class Cline {
 			this.conversationHistoryDeletedRange = contextManagementMetadata.conversationHistoryDeletedRange
 			await this.saveClineMessages() // saves task history item which we use to keep track of conversation history deleted range
 		}
-
-		// NOTE: 记录发送给模型的信息
 		const ollamaMessages: Message[] = [
 			{ role: "system", content: systemPrompt },
-			...contextManagementMetadata.truncatedConversationHistory.map((msg) => ({
+			...contextManagementMetadata.truncatedConversationHistory.map(msg => ({
 				role: msg.role,
 				content:
 					typeof msg.content === "string"
@@ -1595,7 +1591,7 @@ export class Cline {
 		]
 		logMessages(ollamaMessages)
 
-		// 6. 使用 createMessage 方法生成 API 请求，传入生成的 systemPrompt 和经过截断的 LLM API 对话历史。获取返回的流并创建异步迭代器。【核心交互】
+
 		let stream = this.api.createMessage(systemPrompt, contextManagementMetadata.truncatedConversationHistory)
 
 		const iterator = stream[Symbol.asyncIterator]()

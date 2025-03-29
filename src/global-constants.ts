@@ -7,6 +7,8 @@
  *
  * Cline 的<发布者名称>.<扩展名> 为 saoudrizwan.claude-dev
  */
+
+// NOTE: These are here temporarily until we find a better home for them
 export const GlobalFileNames = {
 	/** 存放 LLM API 对话历史记录（均以 Anthropic API 形式存放） */
 	apiConversationHistory: "api_conversation_history.json",

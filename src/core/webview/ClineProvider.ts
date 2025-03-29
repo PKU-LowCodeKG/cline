@@ -120,6 +120,10 @@ type GlobalStateKey =
 	| "thinkingBudgetTokens"
 	| "planActSeparateModelsSetting"
 
+
+
+
+
 /**
  * ClineProvider 实现了 vscode.WebviewViewProvider 接口，是 Cline 前后端服务的桥梁：
  * 1. 创建插件的 Webview 视图。
