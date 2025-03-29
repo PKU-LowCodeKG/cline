@@ -22,7 +22,7 @@ const generateTOC = (messages: Message[]) => {
 	return titles.join("\n")
 }
 
-export function logMessages(messages: Message[]) {
+export function logMessages(messages: Message[], globalStoragePath: string) {
 	interactionCount++
 
 	// 添加新的CSS样式到styles中

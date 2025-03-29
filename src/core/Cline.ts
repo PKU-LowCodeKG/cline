@@ -229,7 +229,8 @@ export class Cline {
 	// 4. 对于 LLM response，根据 `attemptApiRequest` 函数，Cline 会将 LLM response 转为 Anthropic.MessageParam[] 形式，存入 LLM API 对话历史（ApiConversationHistory 的维护）
 
 	private async ensureTaskDirectoryExists(): Promise<string> {
-		const globalStoragePath = this.providerRef.deref()?.context.globalStorageUri.fsPath
+		// 这里用全局变量
+		globalStoragePath = this.providerRef.deref()?.context.globalStorageUri.fsPath
 		if (!globalStoragePath) {
 			throw new Error("Global storage uri is invalid")
 		}
@@ -1589,7 +1590,7 @@ export class Cline {
 								.join("\n"),
 			})),
 		]
-		logMessages(ollamaMessages)
+		logMessages(ollamaMessages, this.providerRef.deref()?.context.globalStorageUri.fsPath)
 
 
 		let stream = this.api.createMessage(systemPrompt, contextManagementMetadata.truncatedConversationHistory)
