@@ -79,7 +79,6 @@ const cwd = vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath
 type ToolResponse = string | Array<Anthropic.TextBlockParam | Anthropic.ImageBlockParam>
 type UserContent = Array<Anthropic.ContentBlockParam>
 
-export let globalStoragePath: any
 /**
  * Cline 类是 ClineProvider 的核心类。
  *
@@ -229,8 +228,7 @@ export class Cline {
 	// 4. 对于 LLM response，根据 `attemptApiRequest` 函数，Cline 会将 LLM response 转为 Anthropic.MessageParam[] 形式，存入 LLM API 对话历史（ApiConversationHistory 的维护）
 
 	private async ensureTaskDirectoryExists(): Promise<string> {
-		// 这里用全局变量
-		globalStoragePath = this.providerRef.deref()?.context.globalStorageUri.fsPath
+		const globalStoragePath = this.providerRef.deref()?.context.globalStorageUri.fsPath
 		if (!globalStoragePath) {
 			throw new Error("Global storage uri is invalid")
 		}
@@ -1565,6 +1563,8 @@ export class Cline {
 				preferredLanguageInstructions,
 			)
 		}
+
+		// 5. 如果之前的 API 请求的 token 使用量接近上下文窗口的最大值，则截断对话历史记录，为新请求腾出空间。
 		const contextManagementMetadata = this.contextManager.getNewContextMessagesAndMetadata(
 			this.apiConversationHistory,
 			this.clineMessages,
@@ -1577,6 +1577,8 @@ export class Cline {
 			this.conversationHistoryDeletedRange = contextManagementMetadata.conversationHistoryDeletedRange
 			await this.saveClineMessages() // saves task history item which we use to keep track of conversation history deleted range
 		}
+
+		// NOTE: 记录发送给模型的信息
 		const ollamaMessages: Message[] = [
 			{ role: "system", content: systemPrompt },
 			...contextManagementMetadata.truncatedConversationHistory.map(msg => ({

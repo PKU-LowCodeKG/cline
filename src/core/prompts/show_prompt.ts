@@ -1,7 +1,6 @@
 import fs from "fs"
 import path from "path"
 import { Message } from "ollama"
-import { globalStoragePath } from "../Cline"
 
 let interactionCount = 0
 let currentLogFile = ""
@@ -22,7 +21,7 @@ const generateTOC = (messages: Message[]) => {
 	return titles.join("\n")
 }
 
-export function logMessages(messages: Message[], globalStoragePath2: any) {
+export function logMessages(messages: Message[], globalStoragePath: any) {
 	interactionCount++
 
 	// 添加新的CSS样式到styles中
@@ -202,7 +201,8 @@ export function logMessages(messages: Message[], globalStoragePath2: any) {
 			})
 			.replace(/[\/:]/g, "-")
 
-		const logDir = path.join(globalStoragePath?globalStoragePath:globalStoragePath2, "log")
+        // FIXME: globalStoragePath 可能为 undefined
+		const logDir = path.join(globalStoragePath, "log")
 		if (!fs.existsSync(logDir)) {
 			fs.mkdirSync(logDir, { recursive: true })
 		}
