@@ -1563,6 +1563,8 @@ export class Cline {
 				preferredLanguageInstructions,
 			)
 		}
+
+		// 5. 如果之前的 API 请求的 token 使用量接近上下文窗口的最大值，则截断对话历史记录，为新请求腾出空间。
 		const contextManagementMetadata = this.contextManager.getNewContextMessagesAndMetadata(
 			this.apiConversationHistory,
 			this.clineMessages,
@@ -1575,6 +1577,8 @@ export class Cline {
 			this.conversationHistoryDeletedRange = contextManagementMetadata.conversationHistoryDeletedRange
 			await this.saveClineMessages() // saves task history item which we use to keep track of conversation history deleted range
 		}
+
+		// NOTE: 记录发送给模型的信息
 		const ollamaMessages: Message[] = [
 			{ role: "system", content: systemPrompt },
 			...contextManagementMetadata.truncatedConversationHistory.map(msg => ({
