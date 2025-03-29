@@ -1,7 +1,20 @@
 import fs from "fs"
 import path from "path"
-import { Message } from "ollama"
-import { globalStoragePath } from "../Cline"
+
+export interface Message {
+    role: string;
+    content: string;
+    images?: Uint8Array[] | string[];
+    tool_calls?: ToolCall[];
+}
+interface ToolCall {
+    function: {
+        name: string;
+        arguments: {
+            [key: string]: any;
+        };
+    };
+}
 
 let interactionCount = 0
 let currentLogFile = ""
@@ -22,7 +35,7 @@ const generateTOC = (messages: Message[]) => {
 	return titles.join("\n")
 }
 
-export function logMessages(messages: Message[]) {
+export function logMessages(messages: Message[], globalStoragePath: any) {
 	interactionCount++
 
 	// 添加新的CSS样式到styles中
@@ -43,9 +56,10 @@ export function logMessages(messages: Message[]) {
                 top: 0;
                 left: 0;
                 width: 200px;
-                height: 100vh;
+                height: 90vh;
                 background: white;
                 padding: 20px;
+                padding-bottom: 100px; /* Add extra padding at the bottom */
                 box-shadow: 2px 0 5px rgba(0,0,0,0.1);
                 overflow-y: auto;
             }
@@ -201,6 +215,7 @@ export function logMessages(messages: Message[]) {
 			})
 			.replace(/[\/:]/g, "-")
 
+        // FIXME: globalStoragePath 可能为 undefined
 		const logDir = path.join(globalStoragePath, "log")
 		if (!fs.existsSync(logDir)) {
 			fs.mkdirSync(logDir, { recursive: true })
@@ -239,15 +254,18 @@ export function logMessages(messages: Message[]) {
  * @param outputBuffer
  */
 export function logOutput(outputBuffer: string = "") {
-	// Read existing content
-	const existingContent = fs.readFileSync(currentLogFile, "utf8")
-
-	// Replace entire navigation content and add output section
-	const updatedContent = existingContent
-		.replace(`</ul>`, `\n<li class="sub-nav"><a href="#output-${interactionCount}">Output</a></li></ul>`)
-		.replace(
-			"</body>",
-			`
+    // Read existing content
+    const existingContent = fs.readFileSync(currentLogFile, 'utf8')
+    
+    // Replace entire navigation content and add output section
+    const updatedContent = existingContent
+        .replace(
+            /<\/ul>(?!.*<\/ul>)/,  // Matches last </ul>
+            `\n<li class="sub-nav"><a href="#output-${interactionCount}">Output</a></li></ul>`
+        )
+        .replace(
+            /<\/body>(?!.*<\/body>)/,  // Matches last </body>
+            `
             <div>
                 <h2 id="output-${interactionCount}">Output</h2>
                 <pre><code>${outputBuffer}</code></pre>

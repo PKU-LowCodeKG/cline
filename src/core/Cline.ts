@@ -79,7 +79,6 @@ const cwd = vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath
 type ToolResponse = string | Array<Anthropic.TextBlockParam | Anthropic.ImageBlockParam>
 type UserContent = Array<Anthropic.ContentBlockParam>
 
-export let globalStoragePath: any
 /**
  * Cline 类是 ClineProvider 的核心类。
  *
@@ -1564,6 +1563,8 @@ export class Cline {
 				preferredLanguageInstructions,
 			)
 		}
+
+		// 5. 如果之前的 API 请求的 token 使用量接近上下文窗口的最大值，则截断对话历史记录，为新请求腾出空间。
 		const contextManagementMetadata = this.contextManager.getNewContextMessagesAndMetadata(
 			this.apiConversationHistory,
 			this.clineMessages,
@@ -1576,6 +1577,8 @@ export class Cline {
 			this.conversationHistoryDeletedRange = contextManagementMetadata.conversationHistoryDeletedRange
 			await this.saveClineMessages() // saves task history item which we use to keep track of conversation history deleted range
 		}
+
+		// NOTE: 记录发送给模型的信息
 		const ollamaMessages: Message[] = [
 			{ role: "system", content: systemPrompt },
 			...contextManagementMetadata.truncatedConversationHistory.map(msg => ({
@@ -1589,7 +1592,7 @@ export class Cline {
 								.join("\n"),
 			})),
 		]
-		logMessages(ollamaMessages)
+		logMessages(ollamaMessages, this.providerRef.deref()?.context.globalStorageUri.fsPath)
 
 
 		let stream = this.api.createMessage(systemPrompt, contextManagementMetadata.truncatedConversationHistory)

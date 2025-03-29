@@ -5,8 +5,6 @@ import { ApiHandlerOptions, ModelInfo, openAiModelInfoSaneDefaults } from "../..
 import { convertToOllamaMessages } from "../transform/ollama-format"
 import { ApiStream } from "../transform/stream"
 
-import { logMessages } from "../../core/prompts/show_prompt"
-
 export class OllamaHandler implements ApiHandler {
 	private options: ApiHandlerOptions
 	private client: Ollama
@@ -18,9 +16,6 @@ export class OllamaHandler implements ApiHandler {
 
 	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
 		const ollamaMessages: Message[] = [{ role: "system", content: systemPrompt }, ...convertToOllamaMessages(messages)]
-
-		// Log input messages
-		logMessages(ollamaMessages)
 
 		const stream = await this.client.chat({
 			model: this.getModel().id,
