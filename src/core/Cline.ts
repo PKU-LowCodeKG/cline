@@ -1,6 +1,6 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import cloneDeep from "clone-deep"
-import delay from "delay"
+import { setTimeout as setTimeoutPromise } from "node:timers/promises"
 import fs from "fs/promises"
 import getFolderSize from "get-folder-size"
 import os from "os"
@@ -57,14 +57,20 @@ import { ClineIgnoreController, LOCK_TEXT_SYMBOL } from "./ignore/ClineIgnoreCon
 import { parseMentions } from "./mentions"
 import { formatResponse } from "./prompts/responses"
 import { addUserInstructions, SYSTEM_PROMPT } from "./prompts/system"
-import { getNextTruncationRange, getTruncatedMessages } from "./sliding-window"
+import { ContextManager } from "./context-management/ContextManager"
 import { OpenAiHandler } from "../api/providers/openai"
 import { ApiStream } from "../api/transform/stream"
 import { ClineHandler } from "../api/providers/cline"
-import { ClineProvider, GlobalFileNames } from "./webview/ClineProvider"
+import { ClineProvider } from "./webview/ClineProvider"
 import { DEFAULT_LANGUAGE_SETTINGS, getLanguageKey, LanguageDisplay, LanguageKey } from "../shared/Languages"
 import { telemetryService } from "../services/telemetry/TelemetryService"
 import pTimeout from "p-timeout"
+import { GlobalFileNames } from "../global-constants"
+import {
+	checkIsAnthropicContextWindowError,
+	checkIsOpenRouterContextWindowError,
+} from "./context-management/context-error-handling"
+import { AnthropicHandler } from "../api/providers/anthropic"
 import { logOutput, logMessages } from "./prompts/show_prompt"
 import { Message } from "ollama"
 
@@ -89,6 +95,7 @@ export class Cline {
 	private terminalManager: TerminalManager
 	private urlContentFetcher: UrlContentFetcher
 	browserSession: BrowserSession
+	contextManager: ContextManager
 	/** 当前 Cline 实例的任务是否已经编辑过文件 */
 	private didEditFile: boolean = false
 	/** Cline 的自定义指令，只在构造函数中读入 */
@@ -173,6 +180,7 @@ export class Cline {
 		this.terminalManager = new TerminalManager()
 		this.urlContentFetcher = new UrlContentFetcher(provider.context)
 		this.browserSession = new BrowserSession(provider.context, browserSettings)
+		this.contextManager = new ContextManager()
 		this.diffViewProvider = new DiffViewProvider(cwd)
 		this.customInstructions = customInstructions
 		this.autoApprovalSettings = autoApprovalSettings
@@ -1190,7 +1198,7 @@ export class Cline {
 					: ""
 				}` +
 				(responseText
-					? `\n\n${this.chatSettings?.mode === "plan" ? "New message to respond to with plan_mode_response tool (be sure to provide your response in the <response> parameter)" : "New instructions for task continuation"}:\n<user_message>\n${responseText}\n</user_message>`
+					? `\n\n${this.chatSettings?.mode === "plan" ? "New message to respond to with plan_mode_respond tool (be sure to provide your response in the <response> parameter)" : "New instructions for task continuation"}:\n<user_message>\n${responseText}\n</user_message>`
 					: this.chatSettings.mode === "plan"
 						? "(The user did not provide a new message. Consider asking them how they'd like you to proceed, or to switch to Act mode to continue with the task.)"
 						: ""),
@@ -1401,7 +1409,7 @@ export class Cline {
 		// for their associated messages to be sent to the webview, maintaining
 		// the correct order of messages (although the webview is smart about
 		// grouping command_output messages despite any gaps anyways)
-		await delay(50)
+		await setTimeoutPromise(50)
 
 		result = result.trim()
 
@@ -1561,68 +1569,21 @@ export class Cline {
 				preferredLanguageInstructions,
 			)
 		}
-
-		// If the previous API request's total token usage is close to the context window, truncate the conversation history to free up space for the new request
-		// 5. 如果之前的 API 请求的 token 使用量接近上下文窗口的最大值，则截断对话历史记录，以便为新请求腾出空间。
-		if (previousApiReqIndex >= 0) {
-			// 5-1. 如果 previousApiReqIndex 大于或等于 0，则获取上一个请求的信息。通过解析 clineMessages 中的历史记录，计算出 tokensIn、tokensOut、cacheWrites 和 cacheReads 的总和。
-			const previousRequest = this.clineMessages[previousApiReqIndex]
-			if (previousRequest && previousRequest.text) {
-				const { tokensIn, tokensOut, cacheWrites, cacheReads }: ClineApiReqInfo = JSON.parse(previousRequest.text)
-				const totalTokens = (tokensIn || 0) + (tokensOut || 0) + (cacheWrites || 0) + (cacheReads || 0)
-				let contextWindow = this.api.getModel().info.contextWindow || 128_000
-				// FIXME: hack to get anyone using openai compatible with deepseek to have the proper context window instead of the default 128k. We need a way for the user to specify the context window for models they input through openai compatible
-				if (this.api instanceof OpenAiHandler && this.api.getModel().id.toLowerCase().includes("deepseek")) {
-					contextWindow = 64_000
-				}
-				// 5-2. 根据不同的模型（如 DeepSeek、Claude）的 contextWindow，计算出最大允许的 token 数量。
-				let maxAllowedSize: number
-				// 针对不同模型设置窗口大小
-				switch (contextWindow) {
-					case 64_000: // deepseek models
-						maxAllowedSize = contextWindow - 27_000
-						break
-					case 128_000: // most models
-						maxAllowedSize = contextWindow - 30_000
-						break
-					case 200_000: // claude models
-						maxAllowedSize = contextWindow - 40_000
-						break
-					default:
-						maxAllowedSize = Math.max(contextWindow - 40_000, contextWindow * 0.8) // for deepseek, 80% of 64k meant only ~10k buffer which was too small and resulted in users getting context window errors.
-				}
-
-				// This is the most reliable way to know when we're close to hitting the context window.
-				// 5-3 如果当前 token 数量超过了上下文窗口的最大值，则选择保留对话的一部分（例如保留四分之一或二分之一），并更新 `conversationHistoryDeletedRange` 来保存已删除的历史记录。
-				if (totalTokens >= maxAllowedSize) {
-					// Since the user may switch between models with different context windows, truncating half may not be enough (ie if switching from claude 200k to deepseek 64k, half truncation will only remove 100k tokens, but we need to remove much more)
-					// So if totalTokens/2 is greater than maxAllowedSize, we truncate 3/4 instead of 1/2
-					// FIXME: truncating the conversation in a way that is optimal for prompt caching AND takes into account multi-context window complexity is something we need to improve
-					const keep = totalTokens / 2 > maxAllowedSize ? "quarter" : "half"
-
-					// NOTE: it's okay that we overwriteConversationHistory in resume task since we're only ever removing the last user message and not anything in the middle which would affect this range
-					// 调用 getNextTruncationRange 方法 计算出需要截断的信息范围
-					this.conversationHistoryDeletedRange = getNextTruncationRange(
-						this.apiConversationHistory,
-						this.conversationHistoryDeletedRange,
-						keep,
-					)
-					await this.saveClineMessages() // saves task history item which we use to keep track of conversation history deleted range
-					// await this.overwriteApiConversationHistory(truncatedMessages)
-				}
-			}
-		}
-
-		// conversationHistoryDeletedRange is updated only when we're close to hitting the context window, so we don't continuously break the prompt cache
-		// 根据计算出的截断范围，重新构造需要保留的信息
-		const truncatedConversationHistory = getTruncatedMessages(
+		const contextManagementMetadata = this.contextManager.getNewContextMessagesAndMetadata(
 			this.apiConversationHistory,
+			this.clineMessages,
+			this.api,
 			this.conversationHistoryDeletedRange,
+			previousApiReqIndex,
 		)
 
+		if (contextManagementMetadata.updatedConversationHistoryDeletedRange) {
+			this.conversationHistoryDeletedRange = contextManagementMetadata.conversationHistoryDeletedRange
+			await this.saveClineMessages() // saves task history item which we use to keep track of conversation history deleted range
+		}
 		const ollamaMessages: Message[] = [
 			{ role: "system", content: systemPrompt },
-			...truncatedConversationHistory.map(msg => ({
+			...contextManagementMetadata.truncatedConversationHistory.map(msg => ({
 				role: msg.role,
 				content: typeof msg.content === "string"
 					? msg.content
@@ -1631,8 +1592,8 @@ export class Cline {
 		]
 		logMessages(ollamaMessages)
 
-		// 6. 使用 createMessage 方法生成 API 请求，传入生成的 systemPrompt 和经过截断的 LLM API 对话历史。获取返回的流并创建异步迭代器。【核心交互】
-		let stream = this.api.createMessage(systemPrompt, truncatedConversationHistory)
+
+		let stream = this.api.createMessage(systemPrompt, contextManagementMetadata.truncatedConversationHistory)
 
 		const iterator = stream[Symbol.asyncIterator]()
 
@@ -1645,20 +1606,59 @@ export class Cline {
 			this.isWaitingForFirstChunk = false
 		} catch (error) {
 			const isOpenRouter = this.api instanceof OpenRouterHandler || this.api instanceof ClineHandler
-			if (isOpenRouter && !this.didAutomaticallyRetryFailedApiRequest) {
+			const isAnthropic = this.api instanceof AnthropicHandler
+			const isOpenRouterContextWindowError = checkIsOpenRouterContextWindowError(error) && isOpenRouter
+			const isAnthropicContextWindowError = checkIsAnthropicContextWindowError(error) && isAnthropic
+
+			if (isAnthropic && isAnthropicContextWindowError && !this.didAutomaticallyRetryFailedApiRequest) {
+				this.conversationHistoryDeletedRange = this.contextManager.getNextTruncationRange(
+					this.apiConversationHistory,
+					this.conversationHistoryDeletedRange,
+					"quarter", // Force aggressive truncation
+				)
+				await this.saveClineMessages()
+
+				this.didAutomaticallyRetryFailedApiRequest = true
+			} else if (isOpenRouter && !this.didAutomaticallyRetryFailedApiRequest) {
+				if (isOpenRouterContextWindowError) {
+					this.conversationHistoryDeletedRange = this.contextManager.getNextTruncationRange(
+						this.apiConversationHistory,
+						this.conversationHistoryDeletedRange,
+						"quarter", // Force aggressive truncation
+					)
+					await this.saveClineMessages()
+				}
+
 				console.log("first chunk failed, waiting 1 second before retrying")
-				await delay(1000)
+				await setTimeoutPromise(1000)
 				this.didAutomaticallyRetryFailedApiRequest = true
 			} else {
 				// request failed after retrying automatically once, ask user if they want to retry again
 				// note that this api_req_failed ask is unique in that we only present this option if the api hasn't streamed any content yet (ie it fails on the first chunk due), as it would allow them to hit a retry button. However if the api failed mid-stream, it could be in any arbitrary state where some tools may have executed, so that error is handled differently and requires cancelling the task entirely.
+
+				if (isOpenRouterContextWindowError || isAnthropicContextWindowError) {
+					const truncatedConversationHistory = this.contextManager.getTruncatedMessages(
+						this.apiConversationHistory,
+						this.conversationHistoryDeletedRange,
+					)
+
+					// If the conversation has more than 3 messages, we can truncate again. If not, then the conversation is bricked.
+					// ToDo: Allow the user to change their input if this is the case.
+					if (truncatedConversationHistory.length > 3) {
+						error = new Error("Context window exceeded. Click retry to truncate the conversation and try again.")
+						this.didAutomaticallyRetryFailedApiRequest = false
+					}
+				}
+
 				const errorMessage = this.formatErrorWithStatusCode(error)
 
 				const { response } = await this.ask("api_req_failed", errorMessage)
+
 				if (response !== "yesButtonClicked") {
 					// this will never happen since if noButtonClicked, we will clear current task, aborting this instance
 					throw new Error("API request failed")
 				}
+
 				await this.say("api_req_retried")
 			}
 			// delegate generator output from the recursive call
@@ -1784,7 +1784,7 @@ export class Cline {
 							return `[${block.name} for '${block.params.server_name}']`
 						case "ask_followup_question":
 							return `[${block.name} for '${block.params.question}']`
-						case "plan_mode_response":
+						case "plan_mode_respond":
 							return `[${block.name}]`
 						case "attempt_completion":
 							return `[${block.name}]`
@@ -2092,7 +2092,7 @@ export class Cline {
 									await this.diffViewProvider.open(relPath)
 								}
 								await this.diffViewProvider.update(newContent, true)
-								await delay(300) // wait for diff view to update
+								await setTimeoutPromise(300) // wait for diff view to update
 								this.diffViewProvider.scrollToFirstDiff()
 								// showOmissionWarning(this.diffViewProvider.originalContent || "", newContent)
 
@@ -2114,7 +2114,7 @@ export class Cline {
 									telemetryService.captureToolUsage(this.taskId, block.name, true, true)
 
 									// we need an artificial delay to let the diagnostics catch up to the changes
-									await delay(3_500)
+									await setTimeoutPromise(3_500)
 								} else {
 									// If auto-approval is enabled but this tool wasn't auto-approved, send notification
 									showNotificationForApprovalIfAutoApprovalEnabled(
@@ -3035,7 +3035,7 @@ export class Cline {
 							break
 						}
 					}
-					case "plan_mode_response": {
+					case "plan_mode_respond": {
 						const response: string | undefined = block.params.response
 						const optionsRaw: string | undefined = block.params.options
 						const sharedMessage = {
@@ -3044,12 +3044,12 @@ export class Cline {
 						} satisfies ClinePlanModeResponse
 						try {
 							if (block.partial) {
-								await this.ask("plan_mode_response", JSON.stringify(sharedMessage), block.partial).catch(() => {})
+								await this.ask("plan_mode_respond", JSON.stringify(sharedMessage), block.partial).catch(() => {})
 								break
 							} else {
 								if (!response) {
 									this.consecutiveMistakeCount++
-									pushToolResult(await this.sayAndCreateMissingParamError("plan_mode_response", "response"))
+									pushToolResult(await this.sayAndCreateMissingParamError("plan_mode_respond", "response"))
 									//
 									break
 								}
@@ -3063,7 +3063,7 @@ export class Cline {
 								// }
 
 								this.isAwaitingPlanResponse = true
-								let { text, images } = await this.ask("plan_mode_response", JSON.stringify(sharedMessage), false)
+								let { text, images } = await this.ask("plan_mode_respond", JSON.stringify(sharedMessage), false)
 								this.isAwaitingPlanResponse = false
 
 								// webview invoke sendMessage will send this marker in order to put webview into the proper state (responding to an ask) and as a flag to extension that the user switched to ACT mode.
@@ -3075,7 +3075,7 @@ export class Cline {
 								if (optionsRaw && text && parsePartialArrayString(optionsRaw).includes(text)) {
 									// Valid option selected, don't show user message in UI
 									// Update last followup message with selected option
-									const lastPlanMessage = findLast(this.clineMessages, (m) => m.ask === "plan_mode_response")
+									const lastPlanMessage = findLast(this.clineMessages, (m) => m.ask === "plan_mode_respond")
 									if (lastPlanMessage) {
 										lastPlanMessage.text = JSON.stringify({
 											...sharedMessage,
@@ -3844,7 +3844,8 @@ export class Cline {
 
 		// 如果有忙碌的终端并且文件已编辑，则延迟 300 毫秒以确保文件已保存，给终端一些时间来处理相关操作。
 		if (busyTerminals.length > 0 && this.didEditFile) {
-			await delay(300) // delay after saving file to let terminals catch up
+			//  || this.didEditFile
+			await setTimeoutPromise(300) // delay after saving file to let terminals catch up
 		}
 
 		// let terminalWasBusy = false
@@ -3966,7 +3967,7 @@ export class Cline {
 		if (this.chatSettings.mode === "plan") {
 			details += "\nPLAN MODE"
 			details +=
-				"\nIn this mode you should focus on information gathering, asking questions, and architecting a solution. Once you have a plan, use the plan_mode_response tool to engage in a conversational back and forth with the user. Do not use the plan_mode_response tool until you've gathered all the information you need e.g. with read_file or ask_followup_question."
+				"\nIn this mode you should focus on information gathering, asking questions, and architecting a solution. Once you have a plan, use the plan_mode_respond tool to engage in a conversational back and forth with the user. Do not use the plan_mode_respond tool until you've gathered all the information you need e.g. with read_file or ask_followup_question."
 			details +=
 				'\n(Remember: If it seems the user wants you to use tools only available in Act Mode, you should ask the user to "toggle to Act mode" (use those words) - they will have to manually do this themselves with the Plan/Act toggle button below. You do not have the ability to switch to Act Mode yourself, and must wait for the user to do it themselves once they are satisfied with the plan. You also cannot present an option to toggle to Act mode, as this will be something you need to direct the user to do manually themselves.)'
 		} else {

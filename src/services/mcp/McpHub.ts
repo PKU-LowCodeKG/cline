@@ -8,7 +8,7 @@ import {
 	ReadResourceResultSchema,
 } from "@modelcontextprotocol/sdk/types.js"
 import chokidar, { FSWatcher } from "chokidar"
-import delay from "delay"
+import { setTimeout as setTimeoutPromise } from "node:timers/promises"
 import deepEqual from "fast-deep-equal"
 import * as fs from "fs/promises"
 import * as path from "path"
@@ -16,7 +16,7 @@ import * as vscode from "vscode"
 // Zod 是一个 TypeScript 优先的 schema（任何数据类型）的声明和验证库
 // https://www.npmjs.com/package/zod
 import { z } from "zod"
-import { ClineProvider, GlobalFileNames } from "../../core/webview/ClineProvider"
+import { ClineProvider } from "../../core/webview/ClineProvider"
 import {
 	DEFAULT_MCP_TIMEOUT_SECONDS,
 	McpMode,
@@ -31,12 +31,19 @@ import {
 import { fileExistsAtPath } from "../../utils/fs"
 import { arePathsEqual } from "../../utils/path"
 import { secondsToMs } from "../../utils/time"
+import { GlobalFileNames } from "../../global-constants"
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
+
 export type McpConnection = {
 	/** Cline 自定义的 MCP 服务器，不是官方的 McpServer 类型 */
 	server: McpServer
 	client: Client
-	transport: StdioClientTransport
+	transport: StdioClientTransport | SSEClientTransport
 }
+
+export type McpTransportType = "stdio" | "sse"
+
+export type McpServerConfig = z.infer<typeof ServerConfigSchema>
 
 const AutoApproveSchema = z.array(z.string()).default([])
 
@@ -47,27 +54,33 @@ const AutoApproveSchema = z.array(z.string()).default([])
  * 用 safeParse 解析 StdioServerParameters 是否符合这个预期的数据结构（可选字段可以没有）
  */
 
-const StdioConfigSchema = z.object({
-	command: z.string(),
-	args: z.array(z.string()).optional(),
-	env: z.record(z.string()).optional(),
+const BaseConfigSchema = z.object({
 	autoApprove: AutoApproveSchema.optional(),
 	disabled: z.boolean().optional(),
 	timeout: z.number().min(MIN_MCP_TIMEOUT_SECONDS).optional().default(DEFAULT_MCP_TIMEOUT_SECONDS),
 })
 
-/**
- * 多个 MCP 服务器的信息，形如
- * {
- * 	mcpServers: {
- * 		string1(服务器名称): StdioConfigSchema1,
- * 		...
- * 	}
- * }
- */
+const SseConfigSchema = BaseConfigSchema.extend({
+	url: z.string().url(),
+}).transform((config) => ({
+	...config,
+	transportType: "sse" as const,
+}))
+
+const StdioConfigSchema = BaseConfigSchema.extend({
+	command: z.string(),
+	args: z.array(z.string()).optional(),
+	env: z.record(z.string()).optional(),
+}).transform((config) => ({
+	...config,
+	transportType: "stdio" as const,
+}))
+
+const ServerConfigSchema = z.union([StdioConfigSchema, SseConfigSchema])
+
 const McpSettingsSchema = z.object({
 	/** 键是服务器名称，值是 StdioConfigSchema */
-	mcpServers: z.record(StdioConfigSchema),
+	mcpServers: z.record(ServerConfigSchema),
 })
 
 /**
@@ -153,36 +166,51 @@ export class McpHub {
 		return mcpSettingsFilePath
 	}
 
-	/**
-	 * 监视 MCP 设置文件的更改。
-	 * 利用 vscode 的 文件保存事件，当用户保存的文件是 MCP 设置文件时，解析文件内容的 mcpServers 字段，更新服务器连接。
-	 */
+	private async readAndValidateMcpSettingsFile(): Promise<z.infer<typeof McpSettingsSchema> | undefined> {
+		try {
+			const settingsPath = await this.getMcpSettingsFilePath()
+			const content = await fs.readFile(settingsPath, "utf-8")
+
+			let config: any
+
+			// Parse JSON file content
+			try {
+				config = JSON.parse(content)
+			} catch (error) {
+				vscode.window.showErrorMessage(
+					"Invalid MCP settings format. Please ensure your settings follow the correct JSON format.",
+				)
+				return undefined
+			}
+
+			// Validate against schema
+			const result = McpSettingsSchema.safeParse(config)
+			if (!result.success) {
+				vscode.window.showErrorMessage("Invalid MCP settings schema.")
+				return undefined
+			}
+
+			return result.data
+		} catch (error) {
+			console.error("Failed to read MCP settings:", error)
+			return undefined
+		}
+	}
+
 	private async watchMcpSettingsFile(): Promise<void> {
 		const settingsPath = await this.getMcpSettingsFilePath()
 		this.disposables.push(
 			vscode.workspace.onDidSaveTextDocument(async (document) => {
 				if (arePathsEqual(document.uri.fsPath, settingsPath)) {
-					const content = await fs.readFile(settingsPath, "utf-8")
-					const errorMessage =
-						"Invalid MCP settings format. Please ensure your settings follow the correct JSON format."
-					let config: any
-					try {
-						config = JSON.parse(content)
-					} catch (error) {
-						vscode.window.showErrorMessage(errorMessage)
-						return
-					}
-					const result = McpSettingsSchema.safeParse(config)
-					if (!result.success) {
-						vscode.window.showErrorMessage(errorMessage)
-						return
-					}
-					try {
-						vscode.window.showInformationMessage("Updating MCP servers...")
-						await this.updateServerConnections(result.data.mcpServers || {})
-						vscode.window.showInformationMessage("MCP servers updated")
-					} catch (error) {
-						console.error("Failed to process MCP settings change:", error)
+					const settings = await this.readAndValidateMcpSettingsFile()
+					if (settings) {
+						try {
+							vscode.window.showInformationMessage("Updating MCP servers...")
+							await this.updateServerConnections(settings.mcpServers)
+							vscode.window.showInformationMessage("MCP servers updated")
+						} catch (error) {
+							console.error("Failed to process MCP settings change:", error)
+						}
 					}
 				}
 			}),
@@ -194,29 +222,16 @@ export class McpHub {
 	 * 具体来说，读取 Cline 的 MCP 设置文件的 mcpServers 字段，更新服务器连接（似乎一开始是空对象？）。
 	 */
 	private async initializeMcpServers(): Promise<void> {
-		try {
-			const settingsPath = await this.getMcpSettingsFilePath()
-			const content = await fs.readFile(settingsPath, "utf-8")
-			const config = JSON.parse(content)
-			await this.updateServerConnections(config.mcpServers || {})
-		} catch (error) {
-			console.error("Failed to initialize MCP servers:", error)
+		const settings = await this.readAndValidateMcpSettingsFile()
+		if (settings) {
+			await this.updateServerConnections(settings.mcpServers)
 		}
 	}
 
-	/**
-	 * 连接到已经存在的 MCP 服务器
-	 * 1. 为 name 的 MCP 服务器建立 client 和 transport。
-	 * 2. 配置 transport 的 onerror 和 onclose 事件处理函数。
-	 * 	  - 更新连接对象的 服务器状态为 "disconnected"。
-	 * 	  - 将 Cline 的 MCP 服务器的状态变化 通知 webview。
-	 * 3. 用 自定义的 StdioConfigSchema 检查 config 参数的合法性
-	 * 4. 构造 McpConnection 对象，加入到 connections 数组中。
-	 * 5. 将 client 通过 transport 连接到服务器。配置 tools and resources
-	 * @param name 服务器名称
-	 * @param config 用 client 连接服务器的 transport 配置对象
-	 */
-	private async connectToServer(name: string, config: StdioServerParameters): Promise<void> {
+	private async connectToServer(
+		name: string,
+		config: z.infer<typeof StdioConfigSchema> | z.infer<typeof SseConfigSchema>,
+	): Promise<void> {
 		// Remove existing connection if it exists (should never happen, the connection should be deleted beforehand)
 		this.connections = this.connections.filter((conn) => conn.server.name !== name)
 
@@ -232,16 +247,22 @@ export class McpHub {
 				},
 			)
 
-			const transport = new StdioClientTransport({
-				command: config.command,
-				args: config.args,
-				env: {
-					...config.env,
-					...(process.env.PATH ? { PATH: process.env.PATH } : {}),
-					// ...(process.env.NODE_PATH ? { NODE_PATH: process.env.NODE_PATH } : {}),
-				},
-				stderr: "pipe", // necessary for stderr to be available
-			})
+			let transport: StdioClientTransport | SSEClientTransport
+
+			if (config.transportType === "sse") {
+				return
+			} else {
+				transport = new StdioClientTransport({
+					command: config.command,
+					args: config.args,
+					env: {
+						...config.env,
+						...(process.env.PATH ? { PATH: process.env.PATH } : {}),
+						// ...(process.env.NODE_PATH ? { NODE_PATH: process.env.NODE_PATH } : {}),
+					},
+					stderr: "pipe", // necessary for stderr to be available
+				})
+			}
 
 			transport.onerror = async (error) => {
 				console.error(`Transport error for "${name}":`, error)
@@ -408,23 +429,7 @@ export class McpHub {
 		}
 	}
 
-	/**
-	 * 更新 MCP 服务器连接
-	 * 1. 清除所有的 chokidar 文件监视器
-	 * 2. 对比 newServers 的代表的新一批服务器 和 原有连接中的服务器。
-	 *    清除不在 newServers 中的服务器 所在的连接对象
-	 * 3. 找到服务器名称等于 name 的连接对象。
-	 *    - 如果不存在，新建一个连接对象
-	 *       - 为该服务器的 Transport 配置文件设置 chokidar 文件监视器
-	 *       - 连接到该服务器
-	 *    - 如果存在，若该服务器的 Transport 配置对象改变了
-	 *       - 为该服务器的 Transport 配置文件设置 chokidar 文件监视器
-	 *       - 断开该服务器的连接（清除 连接对象，关闭其 client 和 transport）
-	 *       - 连接到该服务器（TODO：为什么不用 restartConnection？）
-	 * 4. 将 Cline 的 MCP 服务器的状态变化 通知 webview
-	 * @param newServers 新一批 MCP 服务器信息（最开始是空对象，后面是 MCP 配置文件的 mcpServers 字段）
-	 */
-	async updateServerConnections(newServers: Record<string, any>): Promise<void> {
+	async updateServerConnections(newServers: Record<string, McpServerConfig>): Promise<void> {
 		this.isConnecting = true
 		this.removeAllFileWatchers()
 		const currentNames = new Set(this.connections.map((conn) => conn.server.name))
@@ -523,7 +528,7 @@ export class McpHub {
 			connection.server.status = "connecting"
 			connection.server.error = ""
 			await this.notifyWebviewOfServerChanges()
-			await delay(500) // artificial delay to show user that server is restarting
+			await setTimeoutPromise(500) // artificial delay to show user that server is restarting
 			try {
 				await this.deleteConnection(serverName)
 				// Try to connect again using existing config
@@ -771,7 +776,7 @@ export class McpHub {
 	public async updateServerTimeout(serverName: string, timeout: number): Promise<void> {
 		try {
 			// Validate timeout against schema
-			const setConfigResult = StdioConfigSchema.shape.timeout.safeParse(timeout)
+			const setConfigResult = BaseConfigSchema.shape.timeout.safeParse(timeout)
 			if (!setConfigResult.success) {
 				throw new Error(`Invalid timeout value: ${timeout}. Must be at minimum ${MIN_MCP_TIMEOUT_SECONDS} seconds.`)
 			}
