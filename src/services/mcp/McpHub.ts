@@ -47,6 +47,13 @@ export type McpServerConfig = z.infer<typeof ServerConfigSchema>
 
 const AutoApproveSchema = z.array(z.string()).default([])
 
+/**
+ * Cline 定义的 StdioClientTransport 配置对象范式
+ *
+ * 官方的接口是 StdioServerParameters，Cline 自定义了这个 数据结构范式，
+ * 用 safeParse 解析 StdioServerParameters 是否符合这个预期的数据结构（可选字段可以没有）
+ */
+
 const BaseConfigSchema = z.object({
 	autoApprove: AutoApproveSchema.optional(),
 	disabled: z.boolean().optional(),
@@ -78,6 +85,7 @@ const StdioConfigSchema = BaseConfigSchema.extend({
 const ServerConfigSchema = z.union([StdioConfigSchema, SseConfigSchema])
 
 const McpSettingsSchema = z.object({
+	/** 键是服务器名称，值是 StdioConfigSchema */
 	mcpServers: z.record(ServerConfigSchema),
 })
 
@@ -195,10 +203,6 @@ export class McpHub {
 		}
 	}
 
-	/**
-	 * 监视 MCP 设置文件的更改。
-	 * 利用 vscode 的 文件保存事件，当用户保存的文件是 MCP 设置文件时，解析文件内容的 mcpServers 字段，更新服务器连接。
-	 */
 	private async watchMcpSettingsFile(): Promise<void> {
 		const settingsPath = await this.getMcpSettingsFilePath()
 		this.disposables.push(
@@ -230,18 +234,6 @@ export class McpHub {
 		}
 	}
 
-	/**
-	 * 连接到已经存在的 MCP 服务器
-	 * 1. 为 name 的 MCP 服务器建立 client 和 transport。
-	 * 2. 配置 transport 的 onerror 和 onclose 事件处理函数。
-	 * 	  - 更新连接对象的 服务器状态为 "disconnected"。
-	 * 	  - 将 Cline 的 MCP 服务器的状态变化 通知 webview。
-	 * 3. 用 自定义的 StdioConfigSchema 检查 config 参数的合法性
-	 * 4. 构造 McpConnection 对象，加入到 connections 数组中。
-	 * 5. 将 client 通过 transport 连接到服务器。配置 tools and resources
-	 * @param name 服务器名称
-	 * @param config 用 client 连接服务器的 transport 配置对象
-	 */
 	private async connectToServer(
 		name: string,
 		config: z.infer<typeof StdioConfigSchema> | z.infer<typeof SseConfigSchema>,
@@ -443,23 +435,6 @@ export class McpHub {
 		}
 	}
 
-
-	/**
-	 * 更新 MCP 服务器连接
-	 * 1. 清除所有的 chokidar 文件监视器
-	 * 2. 对比 newServers 的代表的新一批服务器 和 原有连接中的服务器。
-	 *    清除不在 newServers 中的服务器 所在的连接对象
-	 * 3. 找到服务器名称等于 name 的连接对象。
-	 *    - 如果不存在，新建一个连接对象
-	 *       - 为该服务器的 Transport 配置文件设置 chokidar 文件监视器
-	 *       - 连接到该服务器
-	 *    - 如果存在，若该服务器的 Transport 配置对象改变了
-	 *       - 为该服务器的 Transport 配置文件设置 chokidar 文件监视器
-	 *       - 断开该服务器的连接（清除 连接对象，关闭其 client 和 transport）
-	 *       - 连接到该服务器（【吐槽】为什么不用 restartConnection？）
-	 * 4. 将 Cline 的 MCP 服务器的状态变化 通知 webview
-	 * @param newServers 新一批 MCP 服务器信息（最开始是空对象，后面是 MCP 配置文件的 mcpServers 字段）
-	 */
 	async updateServerConnections(newServers: Record<string, McpServerConfig>): Promise<void> {
 		this.isConnecting = true
 		this.removeAllFileWatchers()

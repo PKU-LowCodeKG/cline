@@ -120,6 +120,10 @@ type GlobalStateKey =
 	| "thinkingBudgetTokens"
 	| "planActSeparateModelsSetting"
 
+
+
+
+
 /**
  * ClineProvider 实现了 vscode.WebviewViewProvider 接口，是 Cline 前后端服务的桥梁：
  * 1. 创建插件的 Webview 视图。
@@ -206,7 +210,6 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		this.mcpHub?.dispose()
 		this.mcpHub = undefined
 		this.accountService = undefined
-		this.conversationObservabilityService.shutdown()
 		this.outputChannel.appendLine("Disposed all disposables")
 
 		// 从活动实例集合中删除当前实例
