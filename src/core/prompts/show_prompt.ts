@@ -1,7 +1,20 @@
 import fs from "fs"
 import path from "path"
-import { Message } from "ollama"
-import { globalStoragePath } from "../Cline"
+
+export interface Message {
+    role: string;
+    content: string;
+    images?: Uint8Array[] | string[];
+    tool_calls?: ToolCall[];
+}
+interface ToolCall {
+    function: {
+        name: string;
+        arguments: {
+            [key: string]: any;
+        };
+    };
+}
 
 let interactionCount = 0
 let currentLogFile = ""
@@ -202,7 +215,7 @@ export function logMessages(messages: Message[], globalStoragePath2: any) {
 			})
 			.replace(/[\/:]/g, "-")
 
-		const logDir = path.join(globalStoragePath?globalStoragePath:globalStoragePath2, "log")
+		const logDir = path.join(globalStoragePath2, "log")
 		if (!fs.existsSync(logDir)) {
 			fs.mkdirSync(logDir, { recursive: true })
 		}
