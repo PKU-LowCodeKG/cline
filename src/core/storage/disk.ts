@@ -5,10 +5,24 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import { fileExistsAtPath } from "../../utils/fs"
 import { ClineMessage } from "../../shared/ExtensionMessage"
 
+/**
+ * Cline 的全局文件名
+ * 1. 在 Windows 上，`context.globalStorageUri.fsPath` 为：
+ * `C:\Users\<你的用户名>\AppData\Roaming\Code\User\globalStorage\<发布者名称>.<扩展名>`
+ * 2. 在 Linux 上，`context.globalStorageUri.fsPath` 为：
+ * `/home/<你的用户名>/.config/Code/User/globalStorage/<发布者名称>.<扩展名>`
+ *
+ * Cline 的<发布者名称>.<扩展名> 为 saoudrizwan.claude-dev
+ */
+
 export const GlobalFileNames = {
+	/** 存放 LLM API 对话历史记录（均以 Anthropic API 形式存放） */
 	apiConversationHistory: "api_conversation_history.json",
+	/** 存放 Cline Message，用于插件 webview UI 显示 */
 	uiMessages: "ui_messages.json",
+	/** 存放 openrouter 的 LLM API 信息 */
 	openRouterModels: "openrouter_models.json",
+	/** 存放 Cline 的 MCP 设置文件 */
 	mcpSettings: "cline_mcp_settings.json",
 	clineRules: ".clinerules",
 }
@@ -20,6 +34,16 @@ export async function ensureTaskDirectoryExists(context: vscode.ExtensionContext
 	return taskDir
 }
 
+// #region 当前任务的 LLM API 对话历史。
+// 【LLM API 对话历史】
+// 1. Cline LLM API 对话历史 均以 Anthropic.MessageParam[] 形式记录
+// 2. 根据 `attemptApiRequest` 函数，Cline 和 LLM 交互时，将 LLM API 对话历史 发送给 ApiHandler 接口的 `createMessage` 方法
+// 3. ApiHandler 接口由各种 LLM 实现，在 `createMessage` 方法中，将 Anthropic.MessageParam[] 形式转为符合自己的格式
+//    - 其中 ConvertToO1Messages 和 ConvertToOpenAiMessages 转换方法比较常用
+//    - 此外，只实现了 Gemini O1 openai 格式同 anthropic.message 相互转换的方法，但是在实际代码中并未调用这几个方法
+// 4. 对于 LLM response，根据 `attemptApiRequest` 函数，Cline 会将 LLM response 转为 Anthropic.MessageParam[] 形式，存入 LLM API 对话历史（ApiConversationHistory 的维护）
+
+/** 从 api_conversation_history.json 读取当前任务的 LLM API 对话历史数组 */
 export async function getSavedApiConversationHistory(
 	context: vscode.ExtensionContext,
 	taskId: string,
@@ -32,6 +56,7 @@ export async function getSavedApiConversationHistory(
 	return []
 }
 
+/** 保存当前任务的 API 对话历史到 api_conversation_history.json 文件 */
 export async function saveApiConversationHistory(
 	context: vscode.ExtensionContext,
 	taskId: string,
@@ -45,7 +70,13 @@ export async function saveApiConversationHistory(
 		console.error("Failed to save API conversation history:", error)
 	}
 }
+// #endregion
 
+
+
+// #region Cline Message 消息数组的维护（用于 webview 呈现），会影响到任务历史 HistoryItem
+
+/** 读取 uiMessages 文件中记录的 Cline Message 数组，只在 `resumeTaskFromHistory()` 中使用  */
 export async function getSavedClineMessages(context: vscode.ExtensionContext, taskId: string): Promise<ClineMessage[]> {
 	const filePath = path.join(await ensureTaskDirectoryExists(context, taskId), GlobalFileNames.uiMessages)
 	if (await fileExistsAtPath(filePath)) {
@@ -62,6 +93,9 @@ export async function getSavedClineMessages(context: vscode.ExtensionContext, ta
 	return []
 }
 
+/**
+ * 将参数中的 Cline Message 数组保存到 uiMessages 文件中
+ */
 export async function saveClineMessages(context: vscode.ExtensionContext, taskId: string, uiMessages: ClineMessage[]) {
 	try {
 		const taskDir = await ensureTaskDirectoryExists(context, taskId)
@@ -71,3 +105,4 @@ export async function saveClineMessages(context: vscode.ExtensionContext, taskId
 		console.error("Failed to save ui messages:", error)
 	}
 }
+// #endregion

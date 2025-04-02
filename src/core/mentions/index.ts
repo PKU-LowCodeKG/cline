@@ -10,7 +10,7 @@ import { diagnosticsToProblemsString } from "../../integrations/diagnostics"
 import { getLatestTerminalOutput } from "../../integrations/terminal/get-latest-output"
 import { getCommitInfo } from "../../utils/git"
 import { getWorkingState } from "../../utils/git"
-import { Cline } from "../Cline"
+import { Task } from "../task"
 
 export function openMention(mention?: string): void {
 	if (!mention) {
@@ -52,7 +52,7 @@ export async function parseMentions(
 	text: string,
 	cwd: string,
 	urlContentFetcher: UrlContentFetcher,
-	_cline: Cline,
+	_Task: Task,
 ): Promise<string> {
 	// 创建一个Set来存储文本中出现的所有 mentions（@）
 	const mentions: Set<string> = new Set()
@@ -202,7 +202,7 @@ export async function parseMentions(
 			console.log("用户原始需求：", req)
 			try {
 				if (req) {
-					const { repositories, url, _text, _images } = await handleRepoSearchAgent(req, _cline)
+					const { repositories, url, _text, _images } = await handleRepoSearchAgent(req, _Task)
 					if (repositories.length > 0) {
 						// 1. 替换原有的任务，要求 Cline 下载用户选择的仓库
 						let newTask = `<task>\n${_text}。请使用 git clone 命令下载这个仓库，并使用 code 命令，在当前 VS Code 工作区中打开这个仓库\n</task>`
@@ -213,7 +213,7 @@ export async function parseMentions(
 						parsedText += "\n\n" + url
 						console.log("新任务：", parsedText)
 					} else {
-						await _cline.say("text", "未找到合适的仓库")
+						await _Task.say("text", "未找到合适的仓库")
 					}
 				}
 			} catch (error) {
@@ -318,7 +318,7 @@ interface RepoInfo {
 	url: string
 }
 
-const handleRepoSearchAgent = async (req: string, _cline: Cline) => {
+const handleRepoSearchAgent = async (req: string, _Task: Task) => {
 	let repositories: string | any[] = []
 	let url: string = ""
 	let _text: string = ""
@@ -361,46 +361,46 @@ const handleRepoSearchAgent = async (req: string, _cline: Cline) => {
 							// 根据不同步骤展示不同的信息
 							switch (step) {
 								case "initial_requirements":
-									await _cline.say("checkpoint_created")
-									await _cline.say("text", `正在分析您的需求: "${data}"...`)
+									await _Task.say("checkpoint_created")
+									await _Task.say("text", `正在分析您的需求: "${data}"...`)
 									break
 								case "refined_requirements":
-									await _cline.say("checkpoint_created")
-									await _cline.say("text", `我理解您的核心需求是: "${data}"`)
+									await _Task.say("checkpoint_created")
+									await _Task.say("text", `我理解您的核心需求是: "${data}"`)
 									break
 								case "search_keywords":
-									await _cline.say("checkpoint_created")
-									await _cline.say("text", `使用以下关键词搜索: ${data.join(", ")}`)
+									await _Task.say("checkpoint_created")
+									await _Task.say("text", `使用以下关键词搜索: ${data.join(", ")}`)
 									break
 								case "initial_repositories":
-									await _cline.say("checkpoint_created")
-									await _cline.say("text", `初步找到 ${data} 个相关仓库，正在筛选...`)
+									await _Task.say("checkpoint_created")
+									await _Task.say("text", `初步找到 ${data} 个相关仓库，正在筛选...`)
 									break
 								case "unique_repositories":
-									await _cline.say("checkpoint_created")
-									await _cline.say("text", `去重后剩余 ${data} 个仓库`)
+									await _Task.say("checkpoint_created")
+									await _Task.say("text", `去重后剩余 ${data} 个仓库`)
 									break
 								case "recalled_repositories":
-									await _cline.say("checkpoint_created")
-									await _cline.say("text", `筛选出最相关的 ${data.length} 个仓库，正在评估仓库1/3...`)
+									await _Task.say("checkpoint_created")
+									await _Task.say("text", `筛选出最相关的 ${data.length} 个仓库，正在评估仓库1/3...`)
 									break
 								case "evaluation_progress":
-									await _cline.say("checkpoint_created")
+									await _Task.say("checkpoint_created")
 
 									const { index, total, current }: { index: number; total: number; current: RepoInfo } = data
 									url += current.html_url + "\n\n"
 
-									await _cline.say("text", `第${index}个仓库的评估结果是\n\n${buildRepoInfoString(current)}`)
+									await _Task.say("text", `第${index}个仓库的评估结果是\n\n${buildRepoInfoString(current)}`)
 									if (index !== 3) {
-										await _cline.say("text", `正在评估仓库 (${index + 1}/${total})...`)
+										await _Task.say("text", `正在评估仓库 (${index + 1}/${total})...`)
 									}
 									break
 								case "final_result":
-									await _cline.say("checkpoint_created")
+									await _Task.say("checkpoint_created")
 
 									repositories = data
 
-									await _cline.say("text", `评估完成！`)
+									await _Task.say("text", `评估完成！`)
 									break
 							}
 						}
@@ -418,17 +418,17 @@ const handleRepoSearchAgent = async (req: string, _cline: Cline) => {
 		}
 
 		// 这里再提问一下用户，让用户选择一个项目进行复用
-		const { text, images } = await _cline.ask(
+		const { text, images } = await _Task.ask(
 			"followup",
 			"检索到的项目已经展示结束，请您选择一个项目进行复用。在您选择后，我们会自动下载项目",
 		)
-		await _cline.say("user_feedback", text ?? "", images)
+		await _Task.say("user_feedback", text ?? "", images)
 
 		_text = text ?? ""
 		_images = images ?? []
 	} catch (error) {
 		console.error("搜索GitHub仓库失败:", error)
-		await _cline.say("text", "搜索GitHub仓库失败")
+		await _Task.say("text", "搜索GitHub仓库失败")
 	}
 	return { repositories, url, _text, _images }
 }

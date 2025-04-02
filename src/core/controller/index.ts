@@ -51,6 +51,16 @@ https://github.com/microsoft/vscode-webview-ui-toolkit-samples/blob/main/default
 https://github.com/KumarVariable/vscode-extension-sidebar-html/blob/master/src/customSidebarViewProvider.ts
 */
 
+/**
+ * Controller【原 ClineProvider】利用 webviewProviderRef 私有属性，实现了 vscode.WebviewViewProvider 接口，是 Cline 前后端服务的桥梁：
+ * 1. 创建插件的 Webview 视图。
+ * 2. 管理 Task 实例【原 Cline 实例】的状态（只会存在一个）
+ * 3. 维护 Cline 与 Webview 之间的通信。
+ *
+ * 在插件启动时创建一个 Controller 实例，并在插件关闭时销毁该实例。
+ *
+ * Controller 实例用两种方式创建一个 Task 实例作为其私有属性，用于处理用户的任务请求（新建任务/继续旧任务）。
+ */
 export class Controller {
 	private disposables: vscode.Disposable[] = []
 	private task?: Task
@@ -60,6 +70,13 @@ export class Controller {
 	private latestAnnouncementId = "march-22-2025" // update to some unique identifier when we add a new announcement
 	private webviewProviderRef: WeakRef<WebviewProvider>
 
+	/**
+	 * 该构造函数是由 WebviewProvider 的构造函数触发的
+	 * 用于初始化 Controller 实例 以及核心组件
+	 * @param context 
+	 * @param outputChannel 
+	 * @param webviewProvider 
+	 */
 	constructor(
 		readonly context: vscode.ExtensionContext,
 		private readonly outputChannel: vscode.OutputChannel,
@@ -83,10 +100,18 @@ export class Controller {
 	- https://vscode-docs.readthedocs.io/en/stable/extensions/patterns-and-principles/
 	- https://github.com/microsoft/vscode-extension-samples/blob/main/webview-sample/src/extension.ts
 	*/
+	/**
+	 * 该函数是由 WebviewProvider 的 dispose 函数触发的
+	 * 释放各种资源和事件监听器
+	 */
 	async dispose() {
 		this.outputChannel.appendLine("Disposing ClineProvider...")
+
+		// 清除任务并记录日志
 		await this.clearTask()
 		this.outputChannel.appendLine("Cleared task")
+
+		// 遍历并释放所有可处置对象
 		while (this.disposables.length) {
 			const x = this.disposables.pop()
 			if (x) {
@@ -120,6 +145,10 @@ export class Controller {
 		await updateGlobalState(this.context, "userInfo", info)
 	}
 
+	/**
+	 * 【主线】使用指定的任务和可选的图片初始化 Cline 实例。
+	 * 该函数确保在启动新任务之前清除任何现有任务，然后获取必要的状态以创建新的 `Cline` 实例。
+	 */
 	async initClineWithTask(task?: string, images?: string[]) {
 		await this.clearTask() // ensures that an existing task doesn't exist before starting a new one, although this shouldn't be possible since user must clear task before starting a new one
 		const { apiConfiguration, customInstructions, autoApprovalSettings, browserSettings, chatSettings } =
@@ -136,6 +165,10 @@ export class Controller {
 		)
 	}
 
+	/**
+	 * 【主线】初始化带有历史项的 Cline 实例。
+	 * 该函数首先清除当前任务，然后从状态中获取配置和设置，最后使用这些配置和设置以及传入的历史项创建一个新的 Cline 实例，用于恢复之前的任务。
+	 */
 	async initClineWithHistoryItem(historyItem: HistoryItem) {
 		await this.clearTask()
 		const { apiConfiguration, customInstructions, autoApprovalSettings, browserSettings, chatSettings } =
@@ -154,11 +187,21 @@ export class Controller {
 	}
 
 	// Send any JSON serializable data to the react app
+	/**
+	 * 向与当前视图关联的 Webview 发送一个可序列化为 JSON 的消息。
+	 * 1. 前端需要监听 "message" 事件
+	 * 2. 消息是异步发送的，确保不会阻塞主线程。
+	 * 前端通过监听 "message" 事件，在 WebView 内接收来自插件的消息。（见 webview-ui\src\context\ExtensionStateContext.tsx）
+	 * @param message 要发送的消息，必须是一个可序列化为 JSON 的对象。
+	 */
 	async postMessageToWebview(message: ExtensionMessage) {
 		await this.webviewProviderRef.deref()?.view?.webview.postMessage(message)
 	}
 
 	/**
+	 * 该函数是由 WebviewProvider 的 setWebviewMessageListener 函数触发的
+	 * 用于根据接收到的消息类型执行相应的操作。
+	 *
 	 * Sets up an event listener to listen for messages passed from the webview context and
 	 * executes code based on the message that is received.
 	 *
@@ -166,6 +209,7 @@ export class Controller {
 	 */
 	async handleWebviewMessage(message: WebviewMessage) {
 		switch (message.type) {
+			// 增加 MCP 远程服务器
 			case "addRemoteServer": {
 				try {
 					await this.mcpHub?.addRemoteServer(message.serverName!, message.serverUrl!)
@@ -246,6 +290,8 @@ export class Controller {
 					telemetryService.updateTelemetryState(isOptedIn)
 				})
 				break
+			
+			// 【主线】前端发送的消息类型为 "newTask" 时，初始化新的任务实例
 			case "newTask":
 				// Code that should run in response to the hello message command
 				//vscode.window.showInformationMessage(message.text!)
@@ -267,6 +313,7 @@ export class Controller {
 				await this.postStateToWebview()
 				break
 			case "autoApprovalSettings":
+				// 更新自动批准设置
 				if (message.autoApprovalSettings) {
 					await updateGlobalState(this.context, "autoApprovalSettings", message.autoApprovalSettings)
 					if (this.task) {
@@ -302,6 +349,8 @@ export class Controller {
 			// 		this.task.browserSession.relaunchChromeDebugMode()
 			// 	}
 			// 	break
+
+			// 【主线】处理 Webview 的响应消息
 			case "askResponse":
 				this.task?.handleWebviewAskResponse(message.askResponse!, message.text, message.images)
 				break
@@ -361,6 +410,7 @@ export class Controller {
 				await this.refreshOpenRouterModels()
 				break
 			case "refreshOpenAiModels":
+				// 刷新 OpenAI 模型列表并发送到 Webview
 				const { apiConfiguration } = await getAllExtensionState(this.context)
 				const openAiModels = await this.getOpenAiModels(apiConfiguration.openAiBaseUrl, apiConfiguration.openAiApiKey)
 				this.postMessageToWebview({ type: "openAiModels", openAiModels })
@@ -527,6 +577,7 @@ export class Controller {
 			// 	break
 			// }
 			case "toggleMcpServer": {
+				// 切换 MCP 服务器的启用状态
 				try {
 					await this.mcpHub?.toggleServerDisabled(message.serverName!, message.disabled!)
 				} catch (error) {
@@ -535,6 +586,7 @@ export class Controller {
 				break
 			}
 			case "toggleToolAutoApprove": {
+				// 切换 MCP 服务器上某个 tool 的自动批准状态
 				try {
 					await this.mcpHub?.toggleToolAutoApprove(message.serverName!, message.toolNames!, message.autoApprove!)
 				} catch (error) {
@@ -807,12 +859,15 @@ export class Controller {
 
 	async cancelTask() {
 		if (this.task) {
+			// 获取与当前任务ID相关的历史项
 			const { historyItem } = await this.getTaskWithId(this.task.taskId)
+			// 尝试中止 Task 实例绑定的当前任务
 			try {
 				await this.task.abortTask()
 			} catch (error) {
 				console.error("Failed to abort task", error)
 			}
+			// 等待任务状态变为可中止状态，或者超时
 			await pWaitFor(
 				() =>
 					this.task === undefined ||
@@ -825,6 +880,8 @@ export class Controller {
 			).catch(() => {
 				console.error("Failed to abort task")
 			})
+
+			// 如果 Task 实例【原 Cline 实例】仍然存在，将该实例标记为 已废弃，以防止影响后续实例的 GUI
 			if (this.task) {
 				// 'abandoned' will prevent this cline instance from affecting future cline instance gui. this may happen if its hanging on a streaming request
 				this.task.abandoned = true
@@ -844,6 +901,7 @@ export class Controller {
 
 	// MCP
 
+	/** 根据操作系统的不同，返回用户的文档目录路径。只在MCP中用到 */
 	async getDocumentsPath(): Promise<string> {
 		if (process.platform === "win32") {
 			try {
@@ -880,6 +938,7 @@ export class Controller {
 		return path.join(os.homedir(), "Documents")
 	}
 
+	/** 确保 `~/Documents/Cline/MCP` 目录存在。如果目录不存在，则递归创建该目录。 */
 	async ensureMcpServersDirectoryExists(): Promise<string> {
 		const userDocumentsPath = await this.getDocumentsPath()
 		const mcpServersDir = path.join(userDocumentsPath, "Cline", "MCP")
@@ -891,6 +950,7 @@ export class Controller {
 		return mcpServersDir
 	}
 
+	/** 确保 [context.globalStorageUri.fsPath]/settings 目录存在。如果目录不存在，则递归创建该目录。 */
 	async ensureSettingsDirectoryExists(): Promise<string> {
 		const settingsDir = path.join(this.context.globalStorageUri.fsPath, "settings")
 		await fs.mkdir(settingsDir, { recursive: true })
@@ -914,11 +974,14 @@ export class Controller {
 	async getOllamaModels(baseUrl?: string) {
 		try {
 			if (!baseUrl) {
+				// Ollama 默认的本地 URL
 				baseUrl = "http://localhost:11434"
 			}
+			// 检查 URL 是否有效，如果无效则返回空数组
 			if (!URL.canParse(baseUrl)) {
 				return []
 			}
+			// 向 Ollama API 发送请求，获取模型列表
 			const response = await axios.get(`${baseUrl}/api/tags`)
 			const modelsArray = response.data?.models?.map((model: any) => model.name) || []
 			const models = [...new Set<string>(modelsArray)]
@@ -963,6 +1026,11 @@ export class Controller {
 
 	// Auth
 
+	/**
+	 * 验证授权状态是否有效：查看传入的参数 授权状态 `state` 是否与存储的 `authNonce` 值匹配。
+	 * 如果匹配，则清除存储的 `authNonce` 并返回 `true`；否则返回 `false`。
+	 * @param state - 待验证的授权状态字符串，可能为 `null`。
+	 */
 	public async validateAuthState(state: string | null): Promise<boolean> {
 		const storedNonce = await getSecret(this.context, "authNonce")
 		if (!state || state !== storedNonce) {
@@ -1180,6 +1248,7 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 
 	// OpenAi
 
+	/** 调用指定的 baseUrl 获取可用的 OpenAI 模型列表，并返回去重后的模型 ID 数组。 */
 	async getOpenAiModels(baseUrl?: string, apiKey?: string) {
 		try {
 			if (!baseUrl) {
@@ -1206,9 +1275,14 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 
 	// OpenRouter
 
+	/**
+	 * 处理 OpenRouter 的回调。在用户完成 OpenRouter 授权后，通过授权码获取 API 密钥并更新相关配置。
+	 * @param {string} code - OpenRouter 授权码，用于交换 API 密钥。
+	 */
 	async handleOpenRouterCallback(code: string) {
 		let apiKey: string
 		try {
+			// 向 OpenRouter API 发送请求，使用授权码交换 API 密钥
 			const response = await axios.post("https://openrouter.ai/api/v1/auth/keys", { code })
 			if (response.data && response.data.key) {
 				apiKey = response.data.key
@@ -1219,7 +1293,8 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 			console.error("Error exchanging code for API key:", error)
 			throw error
 		}
-
+		
+		// 更新全局状态为使用 OpenRouter 作为 API 提供者
 		const openrouter: ApiProvider = "openrouter"
 		await updateGlobalState(this.context, "apiProvider", openrouter)
 		await storeSecret(this.context, "openRouterApiKey", apiKey)
@@ -1233,12 +1308,14 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 		// await this.postMessageToWebview({ type: "action", action: "settingsButtonClicked" }) // bad ux if user is on welcome
 	}
 
+	/** 确保 [context.globalStorageUri.fsPath]/cache 目录存在。如果目录不存在，则递归创建该目录 */
 	private async ensureCacheDirectoryExists(): Promise<string> {
 		const cacheDir = path.join(this.context.globalStorageUri.fsPath, "cache")
 		await fs.mkdir(cacheDir, { recursive: true })
 		return cacheDir
 	}
 
+	/** 读取 OpenRouter 模型信息文件（openrouter_models.json）。返回解析后的模型信息对象，或者如果文件不存在，则返回 undefined。 */
 	async readOpenRouterModels(): Promise<Record<string, ModelInfo> | undefined> {
 		const openRouterModelsFilePath = path.join(await this.ensureCacheDirectoryExists(), GlobalFileNames.openRouterModels)
 		const fileExists = await fileExistsAtPath(openRouterModelsFilePath)
@@ -1249,6 +1326,9 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 		return undefined
 	}
 
+	/** 从 OpenRouter 的 API 获取最新的模型数据，并将其保存到 openrouter_models.json 中
+	 * 返回一个包含所有模型信息的对象，键为模型ID，值为模型信息。
+	 */
 	async refreshOpenRouterModels() {
 		const openRouterModelsFilePath = path.join(await this.ensureCacheDirectoryExists(), GlobalFileNames.openRouterModels)
 
@@ -1471,6 +1551,14 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 
 	// Task history
 
+	/**
+	 * 根据任务ID获取任务相关的详细信息。
+	 *
+	 * 该函数会从全局状态中获取任务历史记录，并根据提供的任务ID查找对应的任务项。
+	 * 如果找到任务项，会进一步获取任务目录路径、API对话历史文件路径、UI消息文件路径，
+	 * 并读取API对话历史文件内容。如果任务不存在，则从状态中删除该任务ID并抛出错误。
+	 * @param id - 任务的唯一标识符。
+	 */
 	async getTaskWithId(id: string): Promise<{
 		historyItem: HistoryItem
 		taskDirPath: string
@@ -1502,6 +1590,12 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 		throw new Error("Task not found")
 	}
 
+	/**
+	 * 根据给定的任务ID显示任务内容。
+	 * 如果任务ID与当前任务ID不同，则获取该任务的历史记录并初始化客户端。
+	 * 最后，向Webview发送消息以触发聊天按钮点击事件。
+	 * @param id - 要显示的任务的唯一标识符。
+	 */
 	async showTaskWithId(id: string) {
 		if (id !== this.task?.taskId) {
 			// non-current task
@@ -1650,6 +1744,7 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 		}
 	}
 
+	/** 中止当前 Task 实例绑定的当前任务，并清除对 Task 实例的引用。 */
 	async clearTask() {
 		this.task?.abortTask()
 		this.task = undefined // removes reference to it, so once promises end it will be garbage collected
@@ -1695,6 +1790,12 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 	// 	return this.apiConversationHistory
 	// }
 
+	/**
+	 * 根据参数任务 id 更新 Task 历史记录
+	 * 【吐槽】目前只在 Cline.ts 中的 saveClineMessages() 方法中调用
+	 * @param item 要更新的 Task 历史记录 HistoryItem
+	 * @returns 现在所有的 Task 历史记录
+	 */
 	async updateTaskHistory(item: HistoryItem): Promise<HistoryItem[]> {
 		const history = ((await getGlobalState(this.context, "taskHistory")) as HistoryItem[]) || []
 		const existingItemIndex = history.findIndex((h) => h.id === item.id)
@@ -1767,11 +1868,22 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 	}
 
 	// dev
-
+	/**
+	 * 重置当前上下文的状态，包括清除所有全局状态键和密钥。
+	 * 该函数会依次执行以下操作：
+	 * 1. 显示重置状态的提示信息。
+	 * 2. 遍历并清除所有全局状态键的值。
+	 * 3. 清除预定义的密钥列表中的值。
+	 * 4. 如果存在 `cline` 实例，则中止其任务并将其置为 `undefined`。
+	 * 5. 显示状态重置完成的提示信息。
+	 * 6. 将重置后的状态发送到 Webview。
+	 * 7. 向 Webview 发送一条消息，表示聊天按钮被点击。
+	 */
 	async resetState() {
 		vscode.window.showInformationMessage("Resetting state...")
 		await resetExtensionState(this.context)
 		if (this.task) {
+			// 【吐槽】为什么不直接用 clearTask() 方法？
 			this.task.abortTask()
 			this.task = undefined
 		}

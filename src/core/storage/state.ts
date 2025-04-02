@@ -50,6 +50,13 @@ export async function getWorkspaceState(context: vscode.ExtensionContext, key: s
 	return await context.workspaceState.get(key)
 }
 
+/**
+ * 获取应用程序的全局状态和配置信息。
+ *
+ * 该函数通过异步方式从全局状态和密钥存储中获取多个配置项，包括API提供者、模型ID、API密钥、AWS配置、OpenAI配置等。
+ * 它还处理了一些默认值和逻辑，例如为新用户或旧用户设置默认的API提供者。
+ * @returns {Promise<Object>} 返回一个包含所有配置和状态信息的对象，包括API配置、用户信息、任务历史、浏览器设置等。
+ */
 export async function getAllExtensionState(context: vscode.ExtensionContext) {
 	const [
 		storedApiProvider,
