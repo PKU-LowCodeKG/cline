@@ -12,7 +12,7 @@ import { AssistantMessageContent, TextContent, ToolUse, ToolParamName, toolParam
  * @returns AssistantMessageContent[]
  */
 export function parseAssistantMessage(assistantMessage: string) {
-	let contentBlocks: AssistantMessageContent[] = []
+	const contentBlocks: AssistantMessageContent[] = []
 	let currentTextContent: TextContent | undefined = undefined
 	let currentTextContentStartIndex = 0
 	let currentToolUse: ToolUse | undefined = undefined

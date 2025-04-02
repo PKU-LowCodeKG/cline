@@ -1,7 +1,7 @@
 import * as vscode from "vscode"
 import * as path from "path"
 import { listFiles } from "../../services/glob/list-files"
-import { ClineProvider } from "../../core/webview/ClineProvider"
+import { Controller } from "../../core/controller"
 
 /**
  * 获取当前工作区的第一个文件夹（如果有文件夹）的 fsPath（文件系统路径）。
@@ -13,19 +13,21 @@ const cwd = vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath
 // NOTE: 这不是任务开始时，对 listFiles() 函数的直接替换，因为当没有选择工作区时，将对 Desktops 执行（listFiles() 函数？而 这个类是针对工作区的）
 /**
  * Cline 对于 工作区的监视器，用于跟踪 根工作区 cwd 中的文件结构变化。
- * 只在 ClineProvider 实例化时调用。
+ * 只在 Controller 实例化时调用。【原 ClineProvider 类】
+ * NOTE: vscode.Disposable 是一个可以释放资源的对象，用于注册回调函数以释放资源。
+ * 
+ * 在 JS 或 TS 中，使用 WeakRef 可以避免由于不必要的强引用导致的对象无法被及时回收的问题。
+ * https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/WeakRef
+ * 可以通过 .deref() 方法获取其实际引用。
+ * 如果该 target 对象已被 GC 回收则返回 undefined。
  */
 class WorkspaceTracker {
-	private providerRef: WeakRef<ClineProvider>
-	// NOTE: vscode.Disposable 是一个可以释放资源的对象，用于注册回调函数以释放资源。
+	private controllerRef: WeakRef<Controller>
 	private disposables: vscode.Disposable[] = []
 	private filePaths: Set<string> = new Set()
 
-	constructor(provider: ClineProvider) {
-		// 在 JS 或 TS 中，使用 WeakRef 可以避免由于不必要的强引用导致的对象无法被及时回收的问题。
-		// https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/WeakRef
-		// 可以通过 .deref() 方法获取其实际引用。如果该 target 对象已被 GC 回收则返回 undefined
-		this.providerRef = new WeakRef(provider)
+	constructor(controller: Controller) {
+		this.controllerRef = new WeakRef(controller)
 		this.registerListeners()
 	}
 
@@ -113,13 +115,13 @@ class WorkspaceTracker {
 
 	/**
 	 * （当工作区 文件结构 发生变更时），将文件路径的更新推送到 Webview。
+	 * NOTE: 在 webview-ui\src\context\ExtensionStateContext.tsx 中处理
 	 */
 	private workspaceDidUpdate() {
 		if (!cwd) {
 			return
 		}
-		this.providerRef.deref()?.postMessageToWebview({
-			// NOTE: 在 webview-ui\src\context\ExtensionStateContext.tsx 中处理
+		this.controllerRef.deref()?.postMessageToWebview({
 			type: "workspaceUpdated",
 			filePaths: Array.from(this.filePaths).map((file) => {
 				const relativePath = path.relative(cwd, file).toPosix()
