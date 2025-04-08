@@ -10,6 +10,10 @@ import { diagnosticsToProblemsString } from "../../integrations/diagnostics"
 import { getLatestTerminalOutput } from "../../integrations/terminal/get-latest-output"
 import { getCommitInfo } from "../../utils/git"
 import { getWorkingState } from "../../utils/git"
+import { FileContextTracker } from "../context-tracking/FileContextTracker"
+
+
+// NOTE: 这里是我们实现 repoCrawler 所需要引入的实例
 import { Task } from "../task"
 
 export function openMention(mention?: string): void {
@@ -52,6 +56,8 @@ export async function parseMentions(
 	text: string,
 	cwd: string,
 	urlContentFetcher: UrlContentFetcher,
+	fileContextTracker?: FileContextTracker,
+	// NOTE: 用于处理 repoCrawler 的 Task 实例
 	_Task: Task,
 ): Promise<string> {
 	// 创建一个Set来存储文本中出现的所有 mentions（@）
@@ -149,6 +155,10 @@ export async function parseMentions(
 					parsedText += `\n\n<folder_content path="${mentionPath}">\n${content}\n</folder_content>`
 				} else {
 					parsedText += `\n\n<file_content path="${mentionPath}">\n${content}\n</file_content>`
+					// Track that this file was mentioned and its content was included
+					if (fileContextTracker) {
+						await fileContextTracker.trackFileContext(mentionPath, "file_mentioned")
+					}
 				}
 			} catch (error) {
 				if (mention.endsWith("/")) {

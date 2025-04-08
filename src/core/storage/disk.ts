@@ -5,6 +5,19 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import { fileExistsAtPath } from "../../utils/fs"
 import { ClineMessage } from "../../shared/ExtensionMessage"
 
+export interface FileMetadataEntry {
+	path: string
+	record_state: "active" | "stale"
+	record_source: "read_tool" | "user_edited" | "cline_edited" | "file_mentioned"
+	cline_read_date: number | null
+	cline_edit_date: number | null
+	user_edit_date?: number | null
+}
+
+export interface TaskMetadata {
+	files_in_context: FileMetadataEntry[]
+}
+
 /**
  * Cline 的全局文件名
  * 1. 在 Windows 上，`context.globalStorageUri.fsPath` 为：
@@ -14,7 +27,6 @@ import { ClineMessage } from "../../shared/ExtensionMessage"
  *
  * Cline 的<发布者名称>.<扩展名> 为 saoudrizwan.claude-dev
  */
-
 export const GlobalFileNames = {
 	/** 存放 LLM API 对话历史记录（均以 Anthropic API 形式存放） */
 	apiConversationHistory: "api_conversation_history.json",
@@ -25,6 +37,7 @@ export const GlobalFileNames = {
 	/** 存放 Cline 的 MCP 设置文件 */
 	mcpSettings: "cline_mcp_settings.json",
 	clineRules: ".clinerules",
+	taskMetadata: "task_metadata.json",
 }
 
 export async function ensureTaskDirectoryExists(context: vscode.ExtensionContext, taskId: string): Promise<string> {
@@ -106,3 +119,26 @@ export async function saveClineMessages(context: vscode.ExtensionContext, taskId
 	}
 }
 // #endregion
+
+
+export async function getTaskMetadata(context: vscode.ExtensionContext, taskId: string): Promise<TaskMetadata> {
+	const filePath = path.join(await ensureTaskDirectoryExists(context, taskId), GlobalFileNames.taskMetadata)
+	try {
+		if (await fileExistsAtPath(filePath)) {
+			return JSON.parse(await fs.readFile(filePath, "utf8"))
+		}
+	} catch (error) {
+		console.error("Failed to read task metadata:", error)
+	}
+	return { files_in_context: [] }
+}
+
+export async function saveTaskMetadata(context: vscode.ExtensionContext, taskId: string, metadata: TaskMetadata) {
+	try {
+		const taskDir = await ensureTaskDirectoryExists(context, taskId)
+		const filePath = path.join(taskDir, GlobalFileNames.taskMetadata)
+		await fs.writeFile(filePath, JSON.stringify(metadata, null, 2))
+	} catch (error) {
+		console.error("Failed to save task metadata:", error)
+	}
+}

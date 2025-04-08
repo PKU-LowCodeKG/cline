@@ -14,7 +14,6 @@ import { AnthropicHandler } from "../../api/providers/anthropic"
 import { ClineHandler } from "../../api/providers/cline"
 import { OpenRouterHandler } from "../../api/providers/openrouter"
 import { ApiStream } from "../../api/transform/stream"
-import { GlobalFileNames } from "../storage/disk"
 import CheckpointTracker from "../../integrations/checkpoints/CheckpointTracker"
 import { DIFF_VIEW_URI_SCHEME, DiffViewProvider } from "../../integrations/editor/DiffViewProvider"
 import { formatContentBlockToMarkdown } from "../../integrations/misc/export-markdown"
@@ -65,6 +64,7 @@ import { ClineIgnoreController } from ".././ignore/ClineIgnoreController"
 import { parseMentions } from ".././mentions"
 import { formatResponse } from ".././prompts/responses"
 import { addUserInstructions, SYSTEM_PROMPT } from ".././prompts/system"
+import { FileContextTracker } from "../context-tracking/FileContextTracker"
 import {
 	checkIsAnthropicContextWindowError,
 	checkIsOpenRouterContextWindowError,
@@ -76,7 +76,9 @@ import {
 	getSavedClineMessages,
 	saveApiConversationHistory,
 	saveClineMessages,
+	GlobalFileNames,
 } from "../storage/disk"
+import { loadMcpDocumentation } from "../prompts/loadMcpDocumentation"
 
 
 import { logOutput, logMessages } from "../prompts/show_prompt"
@@ -145,6 +147,9 @@ export class Task {
 	isAwaitingPlanResponse = false
 	didRespondToPlanAskBySwitchingMode = false
 
+	// File tracking
+	private fileContextTracker: FileContextTracker
+
 	// streaming
 	isWaitingForFirstChunk = false
 	isStreaming = false
@@ -205,11 +210,17 @@ export class Task {
 			throw new Error("Either historyItem or task/images must be provided")
 		}
 
+		// Initialize file context tracker
+		this.fileContextTracker = new FileContextTracker(controller, this.taskId)
+
 		// Now that taskId is initialized, we can build the API handler
 		this.api = buildApiHandler({
 			...apiConfiguration,
 			taskId: this.taskId,
 		})
+
+		// Set taskId on browserSession for telemetry tracking
+		this.browserSession.setTaskId(this.taskId)
 
 		// Continue with task initialization
 		if (historyItem) {
@@ -238,7 +249,6 @@ export class Task {
 	}
 
 	// Storing task to disk for history
-
 	/** 将一条消息存入 API 对话历史数组，并保存到 api_conversation_history.json 文件 */
 	private async addToApiConversationHistory(message: Anthropic.MessageParam) {
 		this.apiConversationHistory.push(message)
@@ -1159,8 +1169,9 @@ export class Task {
 		this.abort = true // will stop any autonomously running promises
 		this.terminalManager.disposeAll()
 		this.urlContentFetcher.closeBrowser()
-		this.browserSession.closeBrowser()
+		await this.browserSession.dispose()
 		this.clineIgnoreController.dispose()
+		this.fileContextTracker.dispose()
 		await this.diffViewProvider.revertChanges() // need to await for when we want to make sure directories/files are reverted before re-starting the task from a checkpoint
 	}
 	// #endregion
@@ -1317,8 +1328,9 @@ export class Task {
 		}
 	}
 
-	/** 根据 用户自动批准 Cline 使用工具的 权限设置，将工具调用分为 5 种权限，并给出是否允许 */
-	shouldAutoApproveTool(toolName: ToolUseName): boolean {
+	// Check if the tool should be auto-approved based on the settings
+	// Returns bool for most tools, tuple for execute_command (and future nested auto appoved settings)
+	shouldAutoApproveTool(toolName: ToolUseName): boolean | [boolean, boolean] {
 		if (this.autoApprovalSettings.enabled) {
 			switch (toolName) {
 				case "read_file":
@@ -1330,7 +1342,10 @@ export class Task {
 				case "replace_in_file":
 					return this.autoApprovalSettings.actions.editFiles
 				case "execute_command":
-					return this.autoApprovalSettings.actions.executeCommands
+					return [
+						this.autoApprovalSettings.actions.executeSafeCommands,
+						this.autoApprovalSettings.actions.executeAllCommands,
+					]
 				case "browser_action":
 					return this.autoApprovalSettings.actions.useBrowser
 				case "access_mcp_resource":
@@ -1673,6 +1688,8 @@ export class Task {
 						case "ask_followup_question":
 							return `[${block.name} for '${block.params.question}']`
 						case "plan_mode_respond":
+							return `[${block.name}]`
+						case "load_mcp_documentation":
 							return `[${block.name}]`
 						case "attempt_completion":
 							return `[${block.name}]`
@@ -2049,10 +2066,20 @@ export class Task {
 									}
 								}
 
+								// Mark the file as edited by Cline to prevent false "recently modified" warnings
+								this.fileContextTracker.markFileAsEditedByCline(relPath)
+
 								const { newProblemsMessage, userEdits, autoFormattingEdits, finalContent } =
 									await this.diffViewProvider.saveChanges()
 								this.didEditFile = true // used to determine if we should wait for busy terminal to update before sending api request
+
+								// Track file edit operation
+								await this.fileContextTracker.trackFileContext(relPath, "cline_edited")
+
 								if (userEdits) {
+									// Track file edit operation
+									await this.fileContextTracker.trackFileContext(relPath, "user_edited")
+
 									await this.say(
 										"user_feedback_diff",
 										JSON.stringify({
@@ -2160,6 +2187,10 @@ export class Task {
 								}
 								// now execute the tool like normal
 								const content = await extractTextFromFile(absolutePath)
+
+								// Track file read operation
+								await this.fileContextTracker.trackFileContext(relPath, "read_tool")
+
 								pushToolResult(content)
 
 								break
@@ -2474,6 +2505,14 @@ export class Task {
 									// await this.say("inspect_site_result", "") // no result, starts the loading spinner waiting for result
 									await this.say("browser_action_result", "") // starts loading spinner
 
+									// Re-make browserSession to make sure latest settings apply
+									const localContext = this.controllerRef.deref()?.context
+									if (localContext) {
+										await this.browserSession.dispose()
+										this.browserSession = new BrowserSession(localContext, this.browserSettings)
+									} else {
+										console.warn("no controller context available for browserSession")
+									}
 									await this.browserSession.launchBrowser()
 									browserActionResult = await this.browserSession.navigateToUrl(url)
 								} else {
@@ -2566,7 +2605,7 @@ export class Task {
 					case "execute_command": {
 						let command: string | undefined = block.params.command
 						const requiresApprovalRaw: string | undefined = block.params.requires_approval
-						const requiresApproval = requiresApprovalRaw?.toLowerCase() === "true"
+						const requiresApprovalPerLLM = requiresApprovalRaw?.toLowerCase() === "true"
 
 						try {
 							if (block.partial) {
@@ -2617,7 +2656,17 @@ export class Task {
 
 								let didAutoApprove = false
 
-								if (!requiresApproval && this.shouldAutoApproveTool(block.name)) {
+								// If the model says this command is safe and auto aproval for safe commands is true, execute the command
+								// If the model says the command is risky, but *BOTH* auto approve settings are true, execute the command
+								const autoApproveResult = this.shouldAutoApproveTool(block.name)
+								const [autoApproveSafe, autoApproveAll] = Array.isArray(autoApproveResult)
+									? autoApproveResult
+									: [autoApproveResult, false]
+
+								if (
+									(!requiresApprovalPerLLM && autoApproveSafe) ||
+									(requiresApprovalPerLLM && autoApproveSafe && autoApproveAll)
+								) {
 									this.removeLastPartialMessageIfExistsWithType("ask", "command")
 									await this.say("command", command, undefined, false)
 									this.consecutiveAutoApprovedRequestsCount++
@@ -2630,7 +2679,7 @@ export class Task {
 									const didApprove = await askApproval(
 										"command",
 										command +
-											`${this.shouldAutoApproveTool(block.name) && requiresApproval ? COMMAND_REQ_APP_STRING : ""}`, // ugly hack until we refactor combineCommandSequences
+											`${this.shouldAutoApproveTool(block.name) && requiresApprovalPerLLM ? COMMAND_REQ_APP_STRING : ""}`, // ugly hack until we refactor combineCommandSequences
 									)
 									if (!didApprove) {
 										break
@@ -2901,6 +2950,9 @@ export class Task {
 									})
 								}
 
+								// Store the number of options for telemetry
+								const options = parsePartialArrayString(optionsRaw || "[]")
+
 								const { text, images } = await this.ask("followup", JSON.stringify(sharedMessage), false)
 
 								// Check if options contains the text response
@@ -2914,9 +2966,11 @@ export class Task {
 											selected: text,
 										} satisfies ClineAskQuestion)
 										await this.saveClineMessagesAndUpdateHistory()
+										telemetryService.captureOptionSelected(this.taskId, options.length, "act")
 									}
 								} else {
 									// Option not selected, send user feedback
+									telemetryService.captureOptionsIgnored(this.taskId, options.length, "act")
 									await this.say("user_feedback", text ?? "", images)
 								}
 
@@ -2957,6 +3011,9 @@ export class Task {
 								// 	})
 								// }
 
+								// Store the number of options for telemetry
+								const options = parsePartialArrayString(optionsRaw || "[]")
+
 								this.isAwaitingPlanResponse = true
 								let { text, images } = await this.ask("plan_mode_respond", JSON.stringify(sharedMessage), false)
 								this.isAwaitingPlanResponse = false
@@ -2977,10 +3034,12 @@ export class Task {
 											selected: text,
 										} satisfies ClinePlanModeResponse)
 										await this.saveClineMessagesAndUpdateHistory()
+										telemetryService.captureOptionSelected(this.taskId, options.length, "plan")
 									}
 								} else {
 									// Option not selected, send user feedback
 									if (text || images?.length) {
+										telemetryService.captureOptionsIgnored(this.taskId, options.length, "plan")
 										await this.say("user_feedback", text ?? "", images)
 									}
 								}
@@ -3009,6 +3068,29 @@ export class Task {
 							break
 						}
 					}
+					case "load_mcp_documentation": {
+						try {
+							if (block.partial) {
+								// shouldn't happen
+								break
+							} else {
+								await this.say("load_mcp_documentation", "", undefined, false)
+
+								const mcpHub = this.controllerRef.deref()?.mcpHub
+								if (!mcpHub) {
+									throw new Error("MCP hub not available")
+								}
+
+								pushToolResult(await loadMcpDocumentation(mcpHub))
+
+								break
+							}
+						} catch (error) {
+							await handleError("loading MCP documentation", error)
+							break
+						}
+					}
+
 					// 【核心交互】如果没有其他工具可以执行，那么正常来说，就会执行这个工具
 					case "attempt_completion": {
 						/*
@@ -3656,9 +3738,18 @@ export class Task {
 							block.text.includes("<task>") ||
 							block.text.includes("<user_message>")
 						) {
+							const parsedText = await parseMentions(
+								block.text,
+								cwd,
+								this.urlContentFetcher,
+								this.fileContextTracker,
+								// NOTE: 这里修改了 parseMentions 的参数，增加了 Cline 实例
+								this
+							)
+
 							return {
 								...block,
-								text: await parseMentions(block.text, cwd, this.urlContentFetcher, this),
+								text: parsedText,
 							}
 						}
 					}
@@ -3814,6 +3905,16 @@ export class Task {
 
 		if (terminalDetails) {
 			details += terminalDetails
+		}
+
+		// Add recently modified files section
+		const recentlyModifiedFiles = this.fileContextTracker.getAndClearRecentlyModifiedFiles()
+		if (recentlyModifiedFiles.length > 0) {
+			details +=
+				"\n\n# Recently Modified Files\nThese files have been modified since you last accessed them (file was just edited so you may need to re-read it before editing):"
+			for (const filePath of recentlyModifiedFiles) {
+				details += `\n${filePath}`
+			}
 		}
 
 		// Add current time information with timezone
