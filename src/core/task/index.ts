@@ -3742,9 +3742,9 @@ export class Task {
 								block.text,
 								cwd,
 								this.urlContentFetcher,
-								this.fileContextTracker,
 								// NOTE: 这里修改了 parseMentions 的参数，增加了 Cline 实例
-								this
+								this,
+								this.fileContextTracker,
 							)
 
 							return {

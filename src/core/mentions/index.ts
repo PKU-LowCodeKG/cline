@@ -56,9 +56,9 @@ export async function parseMentions(
 	text: string,
 	cwd: string,
 	urlContentFetcher: UrlContentFetcher,
-	fileContextTracker?: FileContextTracker,
-	// NOTE: 用于处理 repoCrawler 的 Task 实例
+	// NOTE: 用于处理 repoCrawler 的 Task 实例。ts 中必选参数不能在可选参数后
 	_Task: Task,
+	fileContextTracker?: FileContextTracker,
 ): Promise<string> {
 	// 创建一个Set来存储文本中出现的所有 mentions（@）
 	const mentions: Set<string> = new Set()
