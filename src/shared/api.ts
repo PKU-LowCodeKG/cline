@@ -12,6 +12,7 @@ export type ApiProvider =
 	| "together"
 	| "deepseek"
 	| "qwen"
+	| "doubao"
 	| "mistral"
 	| "vscode-lm"
 	| "cline"
@@ -28,6 +29,7 @@ export interface ApiHandlerOptions {
 	liteLlmBaseUrl?: string
 	liteLlmModelId?: string
 	liteLlmApiKey?: string
+	liteLlmUsePromptCache?: boolean
 	anthropicBaseUrl?: string
 	openRouterApiKey?: string
 	openRouterModelId?: string
@@ -61,6 +63,7 @@ export interface ApiHandlerOptions {
 	togetherApiKey?: string
 	togetherModelId?: string
 	qwenApiKey?: string
+	doubaoApiKey?: string
 	mistralApiKey?: string
 	azureApiVersion?: string
 	vsCodeLmModelSelector?: any
@@ -376,6 +379,14 @@ export const vertexModels = {
 		inputPrice: 0,
 		outputPrice: 0,
 	},
+	"gemini-2.5-pro-preview-03-25": {
+		maxTokens: 65536,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: false,
+		inputPrice: 1.25,
+		outputPrice: 10,
+	},
 	"gemini-2.0-flash-thinking-exp-01-21": {
 		maxTokens: 65_536,
 		contextWindow: 1_048_576,
@@ -457,6 +468,14 @@ export const geminiModels = {
 		supportsPromptCache: false,
 		inputPrice: 0,
 		outputPrice: 0,
+	},
+	"gemini-2.5-pro-preview-03-25": {
+		maxTokens: 65536,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: false,
+		inputPrice: 1.25,
+		outputPrice: 10,
 	},
 	"gemini-2.0-flash-001": {
 		maxTokens: 8192,
@@ -648,8 +667,8 @@ export const deepSeekModels = {
 		maxTokens: 8_000,
 		contextWindow: 64_000,
 		supportsImages: false,
-		supportsPromptCache: true,
-		inputPrice: 0.27,
+		supportsPromptCache: true, // supports context caching, but not in the way anthropic does it (deepseek reports input tokens and reads/writes in the same usage report) FIXME: we need to show users cache stats how deepseek does it
+		inputPrice: 0, // technically there is no input price, it's all either a cache hit or miss (ApiOptions will not show this). Input is the sum of cache reads and writes
 		outputPrice: 1.1,
 		cacheWritesPrice: 0.27,
 		cacheReadsPrice: 0.07,
@@ -658,8 +677,8 @@ export const deepSeekModels = {
 		maxTokens: 8_000,
 		contextWindow: 64_000,
 		supportsImages: false,
-		supportsPromptCache: true,
-		inputPrice: 0.55,
+		supportsPromptCache: true, // supports context caching, but not in the way anthropic does it (deepseek reports input tokens and reads/writes in the same usage report) FIXME: we need to show users cache stats how deepseek does it
+		inputPrice: 0, // technically there is no input price, it's all either a cache hit or miss (ApiOptions will not show this)
 		outputPrice: 2.19,
 		cacheWritesPrice: 0.55,
 		cacheReadsPrice: 0.14,
@@ -1098,6 +1117,34 @@ export const mainlandQwenModels = {
 	},
 } as const satisfies Record<string, ModelInfo>
 
+// Doubao
+// https://www.volcengine.com/docs/82379/1298459
+// https://console.volcengine.com/ark/region:ark+cn-beijing/openManagement
+export type DoubaoModelId = keyof typeof doubaoModels
+export const doubaoDefaultModelId: DoubaoModelId = "doubao-1-5-pro-256k-250115"
+export const doubaoModels = {
+	"doubao-1-5-pro-256k-250115": {
+		maxTokens: 12_288,
+		contextWindow: 256_000,
+		supportsImages: false,
+		supportsPromptCache: false,
+		inputPrice: 0.7,
+		outputPrice: 1.3,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0,
+	},
+	"doubao-1-5-pro-32k-250115": {
+		maxTokens: 12_288,
+		contextWindow: 32_000,
+		supportsImages: false,
+		supportsPromptCache: false,
+		inputPrice: 0.11,
+		outputPrice: 0.3,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0,
+	},
+} as const satisfies Record<string, ModelInfo>
+
 // Mistral
 // https://docs.mistral.ai/getting-started/models/models_overview/
 export type MistralModelId = keyof typeof mistralModels
@@ -1193,9 +1240,11 @@ export const liteLlmModelInfoSaneDefaults: ModelInfo = {
 	maxTokens: -1,
 	contextWindow: 128_000,
 	supportsImages: true,
-	supportsPromptCache: false,
+	supportsPromptCache: true,
 	inputPrice: 0,
 	outputPrice: 0,
+	cacheWritesPrice: 0,
+	cacheReadsPrice: 0,
 }
 
 // AskSage Models
