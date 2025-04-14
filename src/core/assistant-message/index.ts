@@ -31,6 +31,7 @@ export const toolUseNames = [
 	"plan_mode_respond",
 	"load_mcp_documentation",
 	"attempt_completion",
+	"new_task",
 ] as const
 
 // Converts array of tool call names into a union type ("execute_command" | "read_file" | ...)
@@ -57,6 +58,7 @@ export const toolParamNames = [
 	"options",
 	"response",
 	"result",
+	"context",
 ] as const
 
 /** Cline 定义的 ToolUse Assistant Message 的参数对象键值 */

@@ -10,7 +10,7 @@ import { diagnosticsToProblemsString } from "../../integrations/diagnostics"
 import { getLatestTerminalOutput } from "../../integrations/terminal/get-latest-output"
 import { getCommitInfo } from "../../utils/git"
 import { getWorkingState } from "../../utils/git"
-import { FileContextTracker } from "../context-tracking/FileContextTracker"
+import { FileContextTracker } from "../context/context-tracking/FileContextTracker"
 
 
 // NOTE: 这里是我们实现 repoCrawler 所需要引入的实例

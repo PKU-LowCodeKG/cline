@@ -27,7 +27,7 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
 	) {
 		// 将当前实例添加到 “正在活跃的实例” 集合中
 		WebviewProvider.activeInstances.add(this)
-		this.controller = new Controller(context, outputChannel, this)
+		this.controller = new Controller(context, outputChannel, (message) => this.view?.webview.postMessage(message))
 	}
 
 	/**

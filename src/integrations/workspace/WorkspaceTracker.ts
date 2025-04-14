@@ -2,6 +2,7 @@ import * as vscode from "vscode"
 import * as path from "path"
 import { listFiles } from "../../services/glob/list-files"
 import { Controller } from "../../core/controller"
+import { ExtensionMessage } from "../../shared/ExtensionMessage"
 
 /**
  * 获取当前工作区的第一个文件夹（如果有文件夹）的 fsPath（文件系统路径）。
@@ -22,12 +23,11 @@ const cwd = vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath
  * 如果该 target 对象已被 GC 回收则返回 undefined。
  */
 class WorkspaceTracker {
-	private controllerRef: WeakRef<Controller>
 	private disposables: vscode.Disposable[] = []
 	private filePaths: Set<string> = new Set()
 
-	constructor(controller: Controller) {
-		this.controllerRef = new WeakRef(controller)
+	constructor(private readonly postMessageToWebview: (message: ExtensionMessage) => Promise<void>) {
+		this.postMessageToWebview = postMessageToWebview
 		this.registerListeners()
 	}
 
@@ -121,7 +121,7 @@ class WorkspaceTracker {
 		if (!cwd) {
 			return
 		}
-		this.controllerRef.deref()?.postMessageToWebview({
+		this.postMessageToWebview({
 			type: "workspaceUpdated",
 			filePaths: Array.from(this.filePaths).map((file) => {
 				const relativePath = path.relative(cwd, file).toPosix()

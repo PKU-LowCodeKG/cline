@@ -4,19 +4,7 @@ import fs from "fs/promises"
 import { Anthropic } from "@anthropic-ai/sdk"
 import { fileExistsAtPath } from "../../utils/fs"
 import { ClineMessage } from "../../shared/ExtensionMessage"
-
-export interface FileMetadataEntry {
-	path: string
-	record_state: "active" | "stale"
-	record_source: "read_tool" | "user_edited" | "cline_edited" | "file_mentioned"
-	cline_read_date: number | null
-	cline_edit_date: number | null
-	user_edit_date?: number | null
-}
-
-export interface TaskMetadata {
-	files_in_context: FileMetadataEntry[]
-}
+import { TaskMetadata } from "../context/context-tracking/ContextTrackerTypes"
 
 /**
  * Cline 的全局文件名
@@ -30,6 +18,7 @@ export interface TaskMetadata {
 export const GlobalFileNames = {
 	/** 存放 LLM API 对话历史记录（均以 Anthropic API 形式存放） */
 	apiConversationHistory: "api_conversation_history.json",
+	contextHistory: "context_history.json",
 	/** 存放 Cline Message，用于插件 webview UI 显示 */
 	uiMessages: "ui_messages.json",
 	/** 存放 openrouter 的 LLM API 信息 */
@@ -130,7 +119,7 @@ export async function getTaskMetadata(context: vscode.ExtensionContext, taskId: 
 	} catch (error) {
 		console.error("Failed to read task metadata:", error)
 	}
-	return { files_in_context: [] }
+	return { files_in_context: [], model_usage: [] }
 }
 
 export async function saveTaskMetadata(context: vscode.ExtensionContext, taskId: string, metadata: TaskMetadata) {
