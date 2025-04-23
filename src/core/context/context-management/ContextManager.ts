@@ -22,6 +22,7 @@ type MessageContent = string[]
 type MessageMetadata = string[][]
 
 // Type for a single context update
+/** 含义: [timestamp, updateType, update, metadata] */
 type ContextUpdate = [number, string, MessageContent, MessageMetadata] // [timestamp, updateType, update, metadata]
 
 // Type for the serialized format of our nested maps
@@ -49,6 +50,16 @@ export class ContextManager {
 	// format:  { outerIndex => [EditType, { innerIndex => [[timestamp, updateType, update], ...] }] }
 	// example: { 1 => { [0, 0 => [[<timestamp>, "text", "[NOTE] Some previous conversation history with the user has been removed ..."], ...] }] }
 	// the above example would be how we update the first assistant message to indicate we truncated text
+	/**
+	 * 将 apiMessages 的外层索引（在 “API 对话历史文件” 中的索引）映射到 inner message index 的索引，再映射到一个包含实际更改(按照时间戳排序)的列表。
+	 * 时间戳排序是必要的：
+	 * 1. 在需要回溯到较早的会话历史检查点时，通过时间戳可以知道更改发生的顺序，从而能够正确地撤销（undo）这些更改。
+	 * 2. 这使得在截断时可以使用二分查找来快速定位需要撤销的更改。
+	 *
+	 * 另外，每个更改都有一个 EditType，用于定义消息的类型，以便进行自定义处理。
+	 *
+	 * 格式： < outerIndex => [EditType, < innerIndex => [ContextUpdate, ...] > ] >
+	 */
 	private contextHistoryUpdates: Map<number, [number, Map<number, ContextUpdate[]>]>
 
 	constructor() {
@@ -64,6 +75,8 @@ export class ContextManager {
 
 	/**
 	 * get the stored context history updates from disk
+	 *
+	 * 读取当前任务目录下的 context_history.json
 	 */
 	private async getSavedContextHistory(taskDirectory: string): Promise<Map<number, [number, Map<number, ContextUpdate[]>]>> {
 		try {
@@ -88,6 +101,8 @@ export class ContextManager {
 
 	/**
 	 * save the context history updates to disk
+	 *
+	 * 把 this.contextHistoryUpdates 保存到 当前任务目录下的 context_history.json
 	 */
 	private async saveContextHistory(taskDirectory: string) {
 		try {
@@ -107,6 +122,8 @@ export class ContextManager {
 
 	/**
 	 * primary entry point for getting up to date context & truncating when required
+	 *
+	 * 如果之前的 API 请求的 token 使用量接近上下文窗口的最大值，则截断 LLM API 对话历史记录，为新请求腾出空间。
 	 */
 	async getNewContextMessagesAndMetadata(
 		apiConversationHistory: Anthropic.Messages.MessageParam[],
@@ -120,14 +137,17 @@ export class ContextManager {
 
 		// If the previous API request's total token usage is close to the context window, truncate the conversation history to free up space for the new request
 		if (previousApiReqIndex >= 0) {
+			// 5-1. 如果 previousApiReqIndex 大于或等于 0，则获取上一个请求的信息。通过解析 clineMessages 中的历史记录，计算出 tokensIn、tokensOut、cacheWrites 和 cacheReads 的总和。
 			const previousRequest = clineMessages[previousApiReqIndex]
 			if (previousRequest && previousRequest.text) {
 				const timestamp = previousRequest.ts
 				const { tokensIn, tokensOut, cacheWrites, cacheReads }: ClineApiReqInfo = JSON.parse(previousRequest.text)
 				const totalTokens = (tokensIn || 0) + (tokensOut || 0) + (cacheWrites || 0) + (cacheReads || 0)
+				// 5-2. 根据不同的模型（如 DeepSeek、Claude）的 contextWindow，计算出最大允许的 token 数量。
 				const { maxAllowedSize } = getContextWindowInfo(api)
 
 				// This is the most reliable way to know when we're close to hitting the context window.
+				// 5-3 如果当前 token 数量超过了上下文窗口的最大值，则选择保留对话的一部分（1/4 或 1/2），并更新 `conversationHistoryDeletedRange` 来保存已删除的历史记录。
 				if (totalTokens >= maxAllowedSize) {
 					// Since the user may switch between models with different context windows, truncating half may not be enough (ie if switching from claude 200k to deepseek 64k, half truncation will only remove 100k tokens, but we need to remove much more)
 					// So if totalTokens/2 is greater than maxAllowedSize, we truncate 3/4 instead of 1/2
@@ -189,6 +209,11 @@ export class ContextManager {
 
 	/**
 	 * get truncation range
+	 *
+	 * 【主线】根据已经删除的消息范围，计算当前需要删除的消息范围 并返回
+	 * 1. 始终保留“第一对 user-assistant 信息”（user 是任务信息，唯一包含 <task> 标签的地方；assistant 是第一次回答）
+	 * 2. （基于上一次删除的索引范围）删除剩余对话信息的 1/2 或 3/4，且删除的是 比较老 的消息
+	 * 3. 保证删除的最后一条信息 "role" 为 assistant，以保持 Anthropic 所要求的 user-assistant-user-assistant 结构
 	 */
 	public getNextTruncationRange(
 		apiMessages: Anthropic.Messages.MessageParam[],
@@ -228,6 +253,9 @@ export class ContextManager {
 
 	/**
 	 * external interface to support old calls
+	 *
+	 * 【旧接口】根据删除范围构造截断后的消息数组。
+	 * 是 `getAndAlterTruncatedMessages` 的套壳函数，主要是为了支持旧的调用方式
 	 */
 	public getTruncatedMessages(
 		messages: Anthropic.Messages.MessageParam[],
@@ -238,6 +266,8 @@ export class ContextManager {
 
 	/**
 	 * apply all required truncation methods to the messages in context
+	 *
+	 * 根据删除范围构造截断后的消息数组。是 `applyContextHistoryUpdates` 的唯一调用的地方
 	 */
 	private getAndAlterTruncatedMessages(
 		messages: Anthropic.Messages.MessageParam[],
@@ -247,6 +277,7 @@ export class ContextManager {
 			return messages
 		}
 
+		// 因为老接口中每次 start 都没有变【之前都是1，现在都是2】，这里就只用了 end + 1
 		const updatedMessages = this.applyContextHistoryUpdates(messages, deletedRange ? deletedRange[1] + 1 : 2)
 
 		// OLD NOTE: if you try to console log these, don't forget that logging a reference to an array may not provide the same result as logging a slice() snapshot of that array at that exact moment. The following DOES in fact include the latest assistant message.
@@ -255,6 +286,8 @@ export class ContextManager {
 
 	/**
 	 * applies deletedRange truncation and other alterations based on changes in this.contextHistoryUpdates
+	 *
+	 * TODO：这个函数的逻辑还没搞懂
 	 */
 	private applyContextHistoryUpdates(
 		messages: Anthropic.Messages.MessageParam[],
@@ -262,11 +295,13 @@ export class ContextManager {
 	): Anthropic.Messages.MessageParam[] {
 		// runtime is linear in length of user messages, if expecting a limited number of alterations, could be more optimal to loop over alterations
 
+		// NOTE: 这三行就是老接口的逻辑，“删除”一部分 LLM API 对话历史记录
 		const firstChunk = messages.slice(0, 2) // get first user-assistant pair
 		const secondChunk = messages.slice(startFromIndex) // get remaining messages within context
 		const messagesToUpdate = [...firstChunk, ...secondChunk]
 
 		// we need the mapping from the local indices in messagesToUpdate to the global array of updates in this.contextHistoryUpdates
+		// NOTE: 构建在 “API 对话历史文件” 中的原始坐标数组：[0, 1, startFromIndex, startFromIndex + 1, ...]
 		const originalIndices = [
 			...Array(2).keys(),
 			...Array(secondChunk.length)
@@ -275,6 +310,7 @@ export class ContextManager {
 		]
 
 		for (let arrayIndex = 0; arrayIndex < messagesToUpdate.length; arrayIndex++) {
+			// 遍历 剩余消息，获取其在 “API 对话历史文件” 中的原始坐标
 			const messageIndex = originalIndices[arrayIndex]
 
 			const innerTuple = this.contextHistoryUpdates.get(messageIndex)
@@ -283,9 +319,12 @@ export class ContextManager {
 			}
 
 			// because we are altering this, we need a deep copy
+			// 【吐槽】修改某条消息之前，确保它是完全独立的一份拷贝，防止影响原始数据或触发不希望的引用联动。
+			// 可能是因为 messagesToUpdate[arrayIndex] 是一个对象数组？
 			messagesToUpdate[arrayIndex] = cloneDeep(messagesToUpdate[arrayIndex])
 
 			// Extract the map from the tuple
+			// innerTuple[0] 是 EditType，innerTuple[1] 是 < innerIndex => [ContextUpdate, ...] >
 			const innerMap = innerTuple[1]
 			for (const [blockIndex, changes] of innerMap) {
 				// apply the latest change among n changes - [timestamp, updateType, update]
@@ -399,6 +438,8 @@ export class ContextManager {
 	/**
 	 * wraps the logic for determining file reads to overwrite, and altering state
 	 * returns whether any updates were made (bool) and indices where updates were made
+	 *
+	 * 封装了用于确定“文件读取是否覆盖”的逻辑，并更改状态。返回是否进行了任何更新(布尔值)以及进行了更新的索引。
 	 */
 	private findAndPotentiallySaveFileReadContextHistoryUpdates(
 		apiMessages: Anthropic.Messages.MessageParam[],
@@ -412,6 +453,11 @@ export class ContextManager {
 	/**
 	 * generate a mapping from unique file reads from multiple tool calls to their outer index position(s)
 	 * also return additional metadata to support multiple file reads in file mention text blocks
+	 *
+	 * 生成一个映射，将来自多个工具调用的唯一文件读取内容与其外部索引位置关联起来。
+	 * 【这里应该是说，可能存在多个工具调用 读取了同一个文件的内容，造成冗余】
+	 * 同时返回其他元数据以支持 file mention 文本块中的多个文件读取。
+	 * 分析从 startFromIndex 开始的一系列 apiMessages，提取其中可能涉及重复文件读取的用户消息块（尤其是用户“提到”文件的情况），以便后续做去重或替换处理。
 	 */
 	private getPossibleDuplicateFileReads(
 		apiMessages: Anthropic.Messages.MessageParam[],
