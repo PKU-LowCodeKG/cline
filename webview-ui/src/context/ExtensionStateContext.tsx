@@ -21,7 +21,7 @@ import { TelemetrySetting } from "@shared/TelemetrySetting"
 interface ExtensionStateContextType extends ExtensionState {
 	didHydrateState: boolean
 	showWelcome: boolean
-	theme: any
+	theme: Record<string, string> | undefined
 	openRouterModels: Record<string, ModelInfo>
 	openAiModels: string[]
 	requestyModels: Record<string, ModelInfo>
@@ -34,6 +34,7 @@ interface ExtensionStateContextType extends ExtensionState {
 	setTelemetrySetting: (value: TelemetrySetting) => void
 	setShowAnnouncement: (value: boolean) => void
 	setPlanActSeparateModelsSetting: (value: boolean) => void
+	setMcpServers: (value: McpServer[]) => void
 }
 
 const ExtensionStateContext = createContext<ExtensionStateContextType | undefined>(undefined)
@@ -53,10 +54,12 @@ export const ExtensionStateContextProvider: React.FC<{
 		telemetrySetting: "unset",
 		vscMachineId: "",
 		planActSeparateModelsSetting: true,
+		globalClineRulesToggles: {},
+		localClineRulesToggles: {},
 	})
 	const [didHydrateState, setDidHydrateState] = useState(false)
 	const [showWelcome, setShowWelcome] = useState(false)
-	const [theme, setTheme] = useState<any>(undefined)
+	const [theme, setTheme] = useState<Record<string, string>>()
 	const [filePaths, setFilePaths] = useState<string[]>([])
 	const [openRouterModels, setOpenRouterModels] = useState<Record<string, ModelInfo>>({
 		[openRouterDefaultModelId]: openRouterDefaultModelInfo,
@@ -73,7 +76,19 @@ export const ExtensionStateContextProvider: React.FC<{
 		const message: ExtensionMessage = event.data
 		switch (message.type) {
 			case "state": {
-				setState(message.state!)
+				setState((prevState) => {
+					const incoming = message.state!
+					// Versioning logic for autoApprovalSettings
+					const incomingVersion = incoming.autoApprovalSettings?.version ?? 1
+					const currentVersion = prevState.autoApprovalSettings?.version ?? 1
+					const shouldUpdateAutoApproval = incomingVersion > currentVersion
+					return {
+						...incoming,
+						autoApprovalSettings: shouldUpdateAutoApproval
+							? incoming.autoApprovalSettings
+							: prevState.autoApprovalSettings,
+					}
+				})
 				const config = message.state?.apiConfiguration
 				const hasKey = config
 					? [
@@ -128,6 +143,7 @@ export const ExtensionStateContextProvider: React.FC<{
 				})
 				break
 			}
+
 			case "openRouterModels": {
 				const updatedModels = message.openRouterModels ?? {}
 				setOpenRouterModels({
@@ -184,6 +200,8 @@ export const ExtensionStateContextProvider: React.FC<{
 		mcpMarketplaceCatalog,
 		filePaths,
 		totalTasksSize,
+		globalClineRulesToggles: state.globalClineRulesToggles || {},
+		localClineRulesToggles: state.localClineRulesToggles || {},
 		setApiConfiguration: (value) =>
 			setState((prevState) => ({
 				...prevState,
@@ -209,6 +227,7 @@ export const ExtensionStateContextProvider: React.FC<{
 				...prevState,
 				shouldShowAnnouncement: value,
 			})),
+		setMcpServers: (mcpServers: McpServer[]) => setMcpServers(mcpServers),
 	}
 
 	return <ExtensionStateContext.Provider value={contextValue}>{children}</ExtensionStateContext.Provider>
