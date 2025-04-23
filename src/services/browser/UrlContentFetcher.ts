@@ -9,9 +9,7 @@ import * as cheerio from "cheerio"
 import TurndownService from "turndown"
 // @ts-ignore 注释用于忽略TypeScript编译器的类型检查错误，因为这里的模块可能没有类型定义文件
 import PCR from "puppeteer-chromium-resolver"
-import { fileExistsAtPath } from "../../utils/fs"
-// 为了执行git clone命令，导入Node.js的child_process模块
-import { exec } from "child_process"
+import { fileExistsAtPath } from "@utils/fs"
 
 /** Cline 定义接口，用于描述 puppeteer-chromium-resolver 返回的统计信息结构 */
 interface PCRStats {

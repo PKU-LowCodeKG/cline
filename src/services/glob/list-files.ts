@@ -1,7 +1,7 @@
 import { globby, Options } from "globby"
 import os from "os"
 import * as path from "path"
-import { arePathsEqual } from "../../utils/path"
+import { arePathsEqual } from "@utils/path"
 
 /**
  * 列出指定目录下的文件和子目录、文件。

@@ -2,9 +2,11 @@ import * as path from "path"
 import * as vscode from "vscode"
 import fs from "fs/promises"
 import { Anthropic } from "@anthropic-ai/sdk"
-import { fileExistsAtPath } from "../../utils/fs"
-import { ClineMessage } from "../../shared/ExtensionMessage"
-import { TaskMetadata } from "../context/context-tracking/ContextTrackerTypes"
+import { fileExistsAtPath } from "@utils/fs"
+import { ClineMessage } from "@shared/ExtensionMessage"
+import { TaskMetadata } from "@core/context/context-tracking/ContextTrackerTypes"
+import os from "os"
+import { execa } from "execa"
 
 /**
  * Cline 的全局文件名
@@ -29,11 +31,79 @@ export const GlobalFileNames = {
 	taskMetadata: "task_metadata.json",
 }
 
+/** 根据操作系统的不同，返回用户的文档目录路径 */
+export async function getDocumentsPath(): Promise<string> {
+	if (process.platform === "win32") {
+		try {
+			const { stdout: docsPath } = await execa("powershell", [
+				"-NoProfile", // Ignore user's PowerShell profile(s)
+				"-Command",
+				"[System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::MyDocuments)",
+			])
+			const trimmedPath = docsPath.trim()
+			if (trimmedPath) {
+				return trimmedPath
+			}
+		} catch (err) {
+			console.error("Failed to retrieve Windows Documents path. Falling back to homedir/Documents.")
+		}
+	} else if (process.platform === "linux") {
+		try {
+			// First check if xdg-user-dir exists
+			await execa("which", ["xdg-user-dir"])
+
+			// If it exists, try to get XDG documents path
+			const { stdout } = await execa("xdg-user-dir", ["DOCUMENTS"])
+			const trimmedPath = stdout.trim()
+			if (trimmedPath) {
+				return trimmedPath
+			}
+		} catch {
+			// Log error but continue to fallback
+			console.error("Failed to retrieve XDG Documents path. Falling back to homedir/Documents.")
+		}
+	}
+
+	// Default fallback for all platforms
+	return path.join(os.homedir(), "Documents")
+}
+
 export async function ensureTaskDirectoryExists(context: vscode.ExtensionContext, taskId: string): Promise<string> {
 	const globalStoragePath = context.globalStorageUri.fsPath
 	const taskDir = path.join(globalStoragePath, "tasks", taskId)
 	await fs.mkdir(taskDir, { recursive: true })
 	return taskDir
+}
+
+/** 确保 `~/Documents/Cline/Rules` 目录存在。如果目录不存在，则递归创建该目录。 */
+export async function ensureRulesDirectoryExists(): Promise<string> {
+	const userDocumentsPath = await getDocumentsPath()
+	const clineRulesDir = path.join(userDocumentsPath, "Cline", "Rules")
+	try {
+		await fs.mkdir(clineRulesDir, { recursive: true })
+	} catch (error) {
+		return path.join(os.homedir(), "Documents", "Cline", "Rules") // in case creating a directory in documents fails for whatever reason (e.g. permissions) - this is fine because we will fail gracefully with a path that does not exist
+	}
+	return clineRulesDir
+}
+
+/** 确保 `~/Documents/Cline/MCP` 目录存在。如果目录不存在，则递归创建该目录。 */
+export async function ensureMcpServersDirectoryExists(): Promise<string> {
+	const userDocumentsPath = await getDocumentsPath()
+	const mcpServersDir = path.join(userDocumentsPath, "Cline", "MCP")
+	try {
+		await fs.mkdir(mcpServersDir, { recursive: true })
+	} catch (error) {
+		return "~/Documents/Cline/MCP" // in case creating a directory in documents fails for whatever reason (e.g. permissions) - this is fine since this path is only ever used in the system prompt
+	}
+	return mcpServersDir
+}
+
+/** 确保 [context.globalStorageUri.fsPath]/settings 目录存在。如果目录不存在，则递归创建该目录。 */
+export async function ensureSettingsDirectoryExists(context: vscode.ExtensionContext): Promise<string> {
+	const settingsDir = path.join(context.globalStorageUri.fsPath, "settings")
+	await fs.mkdir(settingsDir, { recursive: true })
+	return settingsDir
 }
 
 // #region 当前任务的 LLM API 对话历史。

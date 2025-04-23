@@ -1,8 +1,7 @@
 import * as vscode from "vscode"
 import * as path from "path"
-import { listFiles } from "../../services/glob/list-files"
-import { Controller } from "../../core/controller"
-import { ExtensionMessage } from "../../shared/ExtensionMessage"
+import { listFiles } from "@services/glob/list-files"
+import { ExtensionMessage } from "@shared/ExtensionMessage"
 
 /**
  * 获取当前工作区的第一个文件夹（如果有文件夹）的 fsPath（文件系统路径）。

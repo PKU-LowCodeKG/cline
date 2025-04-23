@@ -26,13 +26,13 @@ import {
 	McpTool,
 	McpToolCallResponse,
 	MIN_MCP_TIMEOUT_SECONDS,
-} from "../../shared/mcp"
-import { fileExistsAtPath } from "../../utils/fs"
-import { arePathsEqual } from "../../utils/path"
-import { secondsToMs } from "../../utils/time"
-import { GlobalFileNames } from "../../core/storage/disk"
+} from "@shared/mcp"
+import { fileExistsAtPath } from "@utils/fs"
+import { arePathsEqual } from "@utils/path"
+import { secondsToMs } from "@utils/time"
+import { GlobalFileNames } from "@core/storage/disk"
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
-import { ExtensionMessage } from "../../shared/ExtensionMessage"
+import { ExtensionMessage } from "@shared/ExtensionMessage"
 
 // Default timeout for internal MCP data requests in milliseconds; is not the same as the user facing timeout stored as DEFAULT_MCP_TIMEOUT_SECONDS
 const DEFAULT_REQUEST_TIMEOUT_MS = 5000
@@ -302,7 +302,7 @@ export class McpHub {
 					stderrStream.on("data", async (data: Buffer) => {
 						const output = data.toString()
 						// Check if output contains INFO level log
-						const isInfoLog = /^\s*INFO\b/.test(output)
+						const isInfoLog = !/\berror\b/i.test(output)
 
 						if (isInfoLog) {
 							// Log normal informational messages
@@ -577,7 +577,7 @@ export class McpHub {
 
 	// Public methods for server management
 
-	public async toggleServerDisabled(serverName: string, disabled: boolean): Promise<void> {
+	public async toggleServerDisabledRPC(serverName: string, disabled: boolean): Promise<McpServer[]> {
 		try {
 			const config = await this.readAndValidateMcpSettingsFile()
 			if (!config) {
@@ -595,8 +595,20 @@ export class McpHub {
 					connection.server.disabled = disabled
 				}
 
-				await this.notifyWebviewOfServerChanges()
+				const serverOrder = Object.keys(config.mcpServers || {})
+
+				const mcpServers = [...this.connections]
+					.sort((a, b) => {
+						const indexA = serverOrder.indexOf(a.server.name)
+						const indexB = serverOrder.indexOf(b.server.name)
+						return indexA - indexB
+					})
+					.map((connection) => connection.server)
+
+				return mcpServers
 			}
+			console.error(`Server "${serverName}" not found in MCP configuration`)
+			throw new Error(`Server "${serverName}" not found in MCP configuration`)
 		} catch (error) {
 			console.error("Failed to update server disabled state:", error)
 			if (error instanceof Error) {
