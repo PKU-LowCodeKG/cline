@@ -54,11 +54,13 @@ export class ContextManager {
 	// example: { 1 => { [0, 0 => [[<timestamp>, "text", "[NOTE] Some previous conversation history with the user has been removed ..."], ...] }] }
 	// the above example would be how we update the first assistant message to indicate we truncated text
 	/**
+	 * 实际执行的 上下文优化记录
+	 *
 	 * 格式：< outerIndex（API 消息在“API 对话历史文件”中的索引） => [EditType, < innerIndex/blockIndex（消息内部的块坐标） => [ContextUpdate（上下文优化记录）, ...] > ] >
 	 *
 	 * 其中 ContextUpdate 按照第 0 元素（时间戳）排序
-	 * 1. 在需要回溯到较早的会话历史检查点时，通过时间戳可以知道更改发生的顺序，从而能够正确地撤销（undo）这些更改。
-	 * 2. 这使得在截断时可以使用二分查找来快速定位需要撤销的更改。
+	 * 1. 在需要回溯到较早的 checkpoint 时，通过时间戳可以知道 优化 发生的顺序，从而能够正确地 undo 这些 优化。
+	 * 2. 这使得在截断时可以使用二分查找来快速定位需要撤销的 优化。
 	 */
 	private contextHistoryUpdates: Map<number, [number, Map<number, ContextUpdate[]>]>
 
@@ -74,9 +76,7 @@ export class ContextManager {
 	}
 
 	/**
-	 * get the stored context history updates from disk
-	 *
-	 * 读取当前任务目录下的 context_history.json
+	 * get the stored context history updates from disk (context_history.json)
 	 */
 	private async getSavedContextHistory(taskDirectory: string): Promise<Map<number, [number, Map<number, ContextUpdate[]>]>> {
 		try {
@@ -100,9 +100,7 @@ export class ContextManager {
 	}
 
 	/**
-	 * save the context history updates to disk
-	 *
-	 * 把 this.contextHistoryUpdates 保存到 当前任务目录下的 context_history.json
+	 * save the context history updates to disk (context_history.json)
 	 */
 	private async saveContextHistory(taskDirectory: string) {
 		try {
@@ -123,7 +121,9 @@ export class ContextManager {
 	/**
 	 * primary entry point for getting up to date context & truncating when required
 	 *
-	 * 如果之前的 API 请求的 token 使用量接近上下文窗口的最大值，则截断 LLM API 对话历史记录，为新请求腾出空间。
+	 * 如果之前的 API 请求的 token 使用量超过上下文窗口。则
+	 * 1. 应用上下文优化，简化 API 历史消息
+	 * 2. 视情况决定是否裁剪 LLM API 对话历史记录
 	 * @param apiConversationHistory - LLM API 对话历史记录
 	 * @param clineMessages - Cline Message 数组
 	 * @param conversationHistoryDeletedRange - 已有的 API 对话删除范围
@@ -141,17 +141,18 @@ export class ContextManager {
 
 		// If the previous API request's total token usage is close to the context window, truncate the conversation history to free up space for the new request
 		if (previousApiReqIndex >= 0) {
-			// 5-1. 如果 previousApiReqIndex 大于或等于 0，则获取上一个请求的信息。通过解析 clineMessages 中的历史记录，计算出 tokensIn、tokensOut、cacheWrites 和 cacheReads 的总和。
+			// 1. 如果 previousApiReqIndex >= 0，则获取上一个请求的信息。通过解析 clineMessages 中的历史记录，计算出 tokensIn、tokensOut、cacheWrites 和 cacheReads 的总和。
 			const previousRequest = clineMessages[previousApiReqIndex]
 			if (previousRequest && previousRequest.text) {
 				const timestamp = previousRequest.ts
 				const { tokensIn, tokensOut, cacheWrites, cacheReads }: ClineApiReqInfo = JSON.parse(previousRequest.text)
 				const totalTokens = (tokensIn || 0) + (tokensOut || 0) + (cacheWrites || 0) + (cacheReads || 0)
-				// 5-2. 根据不同的模型（如 DeepSeek、Claude）的 contextWindow，计算出最大允许的 token 数量。
+				// 2. 根据不同的模型（如 DeepSeek、Claude）的 contextWindow，计算出最大允许的 token 数量。
 				const { maxAllowedSize } = getContextWindowInfo(api)
 
 				// This is the most reliable way to know when we're close to hitting the context window.
-				// 5-3. 如果当前 token 数量超过了上下文窗口的最大值，则选择保留对话的一部分（1/4 或 1/2），并更新 `conversationHistoryDeletedRange` 来保存已删除的历史记录。
+				// 3. 如果当前 token 数量超过了上下文窗口，则选择保留对话的一部分（1/4 或 1/2）。
+				// 	先应用上下文优化。视情况进行 API 历史的裁剪.
 				if (totalTokens >= maxAllowedSize) {
 					// Since the user may switch between models with different context windows, truncating half may not be enough (ie if switching from claude 200k to deepseek 64k, half truncation will only remove 100k tokens, but we need to remove much more)
 					// So if totalTokens/2 is greater than maxAllowedSize, we truncate 3/4 instead of 1/2
@@ -203,6 +204,7 @@ export class ContextManager {
 			}
 		}
 
+		// 4. 根据删除范围构造截断后的 API 消息数组（并对 API 消息内容进行简化）
 		const truncatedConversationHistory = this.getAndAlterTruncatedMessages(
 			apiConversationHistory,
 			conversationHistoryDeletedRange,
@@ -330,8 +332,6 @@ export class ContextManager {
 			}
 
 			// because we are altering this, we need a deep copy
-			// 【吐槽】修改某条消息之前，确保它是完全独立的一份拷贝，防止影响原始数据或触发不希望的引用联动。
-			// 可能是因为 messagesToUpdate[arrayIndex] 是一个对象数组？
 			messagesToUpdate[arrayIndex] = cloneDeep(messagesToUpdate[arrayIndex])
 
 			// Extract the map from the tuple
@@ -415,9 +415,9 @@ export class ContextManager {
 	/**
 	 * applies the context optimization steps and returns whether any changes were made
 	 *
-	 * 优化对上下文窗口的管理：
+	 * 这个函数本身 并未真的改变了 API 消息的内容，只是生成了一份优化记录，实际修改在 `applyContextHistoryUpdates()`
 	 *
-	 * `v3.10` 优化 API 对话历史的内容（这个函数本身 并未真的改变了 API 消息的内容，只是生成了一份优化记录，实际修改在 `applyContextHistoryUpdates()`）
+	 * `v3.10` 优化 API 对话历史的内容
 	 *  - 解决的问题 → 不同的工具调用 或者 mentions "@" 可能会读取同一个文件的内容，造成冗余。
 	 *  - 解决方案 → 把重复涉及的文件内容替换为 简短的提示信息，只保留文件的最新版本。
 	 * @returns [boolean, Set<number>] - 是否发生了简化，此次简化的消息 在 “API 对话历史文件” 中的索引集合
@@ -669,7 +669,7 @@ export class ContextManager {
 	*
 	 * 该函数会解析并返回一个包含 工具名 和 工具参数 的数组。
 	 *
-	 * 【Callback】在 src/core/task/index.tx 中的 `pushToolResult` 函数中会在 userMessageContent 中加入工具调用的信息
+	 * 在 src/core/task/index.tx 的 `pushToolResult` 函数会在 user 的 API 消息中加入工具调用信息
 	 * ```
 	 * this.userMessageContent.push({
 	 * 		type: "text",
@@ -766,7 +766,8 @@ export class ContextManager {
 			// 1. 某文件的修改记录超过 1 条（工具调用 或 mentions "@" 多次涉及同一个文件）时，才进行优化
 			if (indices.length > 1) {
 				// Process all but the last index, as we will keep that instance of the file read
-				// 2. 真正执行该文件的 所有修改记录，除了最后一条（保留最新的文件版本供 LLM 参考）
+				// 2. 我们希望保留文件最新版本供 LLM 参考，清除在此之前所有的冗余读取
+				//  因此基于 最后一条以外的修改记录 生成 this.contextHistoryUpdates 优化记录
 				for (let i = 0; i < indices.length - 1; i++) {
 					const messageIndex = indices[i][0]
 					const messageType = indices[i][1] // EditType value
@@ -786,7 +787,7 @@ export class ContextManager {
 							let baseText = ""
 							let prevFilesReplaced: string[] = []
 
-							// 3-1. 如果该消息存在 已经完成的优化修改记录，取优化修改记录的最后一条
+							// 3-1. 如果该消息存在 已经完成的优化记录，取优化记录的最后一条
 							//   MessageContent index=0 的内容作为 上一次优化后的该消息文本
 							//   MessageMetadata index=0 的内容作为 上一次优化已经处理的文件名数组
 							const innerTuple = this.contextHistoryUpdates.get(messageIndex)
