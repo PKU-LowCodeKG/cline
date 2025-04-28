@@ -1,7 +1,7 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 import { ApiHandler } from "../"
-import { ApiHandlerOptions, ModelInfo, openRouterDefaultModelId, openRouterDefaultModelInfo } from "../../shared/api"
+import { ApiHandlerOptions, ModelInfo, openRouterDefaultModelId, openRouterDefaultModelInfo } from "@shared/api"
 import { createOpenRouterStream } from "../transform/openrouter-stream"
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import axios from "axios"
@@ -17,6 +17,11 @@ export class ClineHandler implements ApiHandler {
 		this.client = new OpenAI({
 			baseURL: "https://api.cline.bot/v1",
 			apiKey: this.options.clineApiKey || "",
+			defaultHeaders: {
+				"HTTP-Referer": "https://cline.bot", // Optional, for including your app on cline.bot rankings.
+				"X-Title": "Cline", // Optional. Shows in rankings on cline.bot.
+				"X-Task-ID": this.options.taskId || "", // Include the task ID in the request headers
+			},
 		})
 	}
 
