@@ -21,7 +21,7 @@ export async function createOpenRouterStream(
 
 	// prompt caching: https://openrouter.ai/docs/prompt-caching
 	// this was initially specifically for claude models (some models may 'support prompt caching' automatically without this)
-	// gemini models only use the last breakpoint for caching, so the others will be ignored
+	// handles direct model.id match logic
 	switch (model.id) {
 		case "anthropic/claude-3.7-sonnet":
 		case "anthropic/claude-3.7-sonnet:beta":
@@ -40,10 +40,6 @@ export async function createOpenRouterStream(
 		case "anthropic/claude-3-haiku:beta":
 		case "anthropic/claude-3-opus":
 		case "anthropic/claude-3-opus:beta":
-		case "google/gemini-2.5-pro-preview-03-25":
-		case "google/gemini-2.0-flash-001":
-		case "google/gemini-flash-1.5":
-		case "google/gemini-pro-1.5":
 			openAiMessages[0] = {
 				role: "system",
 				content: [
@@ -77,6 +73,74 @@ export async function createOpenRouterStream(
 			break
 		default:
 			break
+	}
+
+	// handles gemini caching logic
+	if (model.id.startsWith("google/") && model.info.supportsPromptCache) {
+		// gemini only uses the last breakpoint for caching, so the others will be ignored
+		openAiMessages[0] = {
+			role: "system",
+			content: [
+				{
+					type: "text",
+					text: systemPrompt,
+					// @ts-ignore-next-line
+					cache_control: { type: "ephemeral" },
+				},
+			],
+		}
+
+		// for safety, but this should always be the case
+		if (openAiMessages.length >= 2) {
+			const msg = openAiMessages[1]
+
+			if (msg) {
+				if (typeof msg.content === "string") {
+					msg.content = [{ type: "text", text: msg.content }]
+				}
+				if (Array.isArray(msg.content)) {
+					// NOTE: this is fine since env details will always be added at the end. but if it weren't there, and the user added a image_url type message, it would pop a text part before it and then move it after to the end.
+					let lastTextPart = msg.content.filter((part) => part.type === "text").pop()
+
+					if (!lastTextPart) {
+						lastTextPart = { type: "text", text: "..." }
+						msg.content.push(lastTextPart)
+					}
+					// @ts-ignore-next-line
+					lastTextPart["cache_control"] = { type: "ephemeral" }
+				}
+			}
+		}
+
+		// it doesn't make sense to alter breakpoints at all with the gemini cache implementation at this time
+		/*const GEMINI_CACHE_USER_MESSAGE_INTERVAL = 4 // add new breakpoint every 4 turns
+		const userMessages = openAiMessages.filter((msg) => msg.role === "user")
+
+		const userMessageCount = userMessages.length
+		const targetUserMessageNumber =
+			Math.floor(userMessageCount / GEMINI_CACHE_USER_MESSAGE_INTERVAL) * GEMINI_CACHE_USER_MESSAGE_INTERVAL
+
+		if (targetUserMessageNumber > 0) {
+			// otherwise dont need to add a breakpoint
+			const msg = userMessages[targetUserMessageNumber - 1]
+
+			if (msg) {
+				if (typeof msg.content === "string") {
+					msg.content = [{ type: "text", text: msg.content }]
+				}
+				if (Array.isArray(msg.content)) {
+					// NOTE: this is fine since env details will always be added at the end. but if it weren't there, and the user added a image_url type message, it would pop a text part before it and then move it after to the end.
+					let lastTextPart = msg.content.filter((part) => part.type === "text").pop()
+
+					if (!lastTextPart) {
+						lastTextPart = { type: "text", text: "..." }
+						msg.content.push(lastTextPart)
+					}
+					// @ts-ignore-next-line
+					lastTextPart["cache_control"] = { type: "ephemeral" }
+				}
+			}
+		}*/
 	}
 
 	// Not sure how openrouter defaults max tokens when no value is provided, but the anthropic api requires this value and since they offer both 4096 and 8192 variants, we should ensure 8192.
@@ -148,7 +212,7 @@ export async function createOpenRouterStream(
 		stream_options: { include_usage: true },
 		transforms: shouldApplyMiddleOutTransform ? ["middle-out"] : undefined,
 		include_reasoning: true,
-		...(model.id === "openai/o3-mini" ? { reasoning_effort: o3MiniReasoningEffort || "medium" } : {}),
+		...(model.id.startsWith("openai/o") ? { reasoning_effort: o3MiniReasoningEffort || "medium" } : {}),
 		...(reasoning ? { reasoning } : {}),
 		...(openRouterProviderSorting ? { provider: { sort: openRouterProviderSorting } } : {}),
 	})

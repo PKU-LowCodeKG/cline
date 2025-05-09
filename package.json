@@ -2,7 +2,7 @@
 	"name": "claude-dev",
 	"displayName": "Cline",
 	"description": "Autonomous coding agent right in your IDE, capable of creating/editing files, running commands, using the browser, and more with your permission every step of the way.",
-	"version": "3.13.3",
+	"version": "3.14.1",
 	"icon": "assets/icons/icon.png",
 	"engines": {
 		"vscode": "^1.84.0"
@@ -118,6 +118,12 @@
 				"command": "cline.focusChatInput",
 				"title": "Jump to Chat Input",
 				"category": "Cline"
+			},
+			{
+				"command": "cline.generateGitCommitMessage",
+				"title": "Generate Commit Message with Cline",
+				"category": "Cline",
+				"icon": "$(robot)"
 			}
 		],
 		"keybindings": [
@@ -128,6 +134,10 @@
 				"win": "ctrl+'",
 				"linux": "ctrl+'",
 				"when": "editorHasSelection"
+			},
+			{
+				"command": "cline.generateGitCommitMessage",
+				"when": "scmProvider == git"
 			}
 		],
 		"menus": {
@@ -207,6 +217,19 @@
 					"command": "cline.addTerminalOutputToChat",
 					"group": "navigation"
 				}
+			],
+			"scm/title": [
+				{
+					"command": "cline.generateGitCommitMessage",
+					"group": "navigation",
+					"when": "scmProvider == git"
+				}
+			],
+			"commandPalette": [
+				{
+					"command": "cline.generateGitCommitMessage",
+					"when": "scmProvider == git"
+				}
 			]
 		},
 		"configuration": {
@@ -244,7 +267,7 @@
 						"high"
 					],
 					"default": "medium",
-					"description": "Controls the reasoning effort when using the o3-mini model. Higher values may result in more thorough but slower responses."
+					"description": "Controls the reasoning effort when using an OpenAI reasoning model. Higher values may result in more thorough but slower responses."
 				},
 				"cline.chromeExecutablePath": {
 					"type": "string",
@@ -291,8 +314,8 @@
 		"watch:esbuild": "node esbuild.js --watch",
 		"watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
 		"package": "npm run build:webview && npm run check-types && npm run lint && node esbuild.js --production",
-		"protos": "node proto/build-proto.js && prettier src/shared/proto --write && prettier src/core/controller --write",
-		"compile-tests": "tsc -p ./tsconfig.test.json --outDir out",
+		"protos": "node proto/build-proto.js && prettier src/shared/proto src/core/controller webview-ui/src/services --write",
+		"compile-tests": "node ./scripts/build-tests.js",
 		"watch-tests": "tsc -p . -w --outDir out",
 		"pretest": "npm run compile-tests && npm run compile && npm run lint",
 		"check-types": "tsc --noEmit",
@@ -312,7 +335,11 @@
 		"publish:marketplace:prerelease": "vsce publish --pre-release && ovsx publish --pre-release",
 		"prepare": "husky",
 		"changeset": "changeset",
-		"version-packages": "changeset version"
+		"version-packages": "changeset version",
+		"docs": "cd docs && mintlify dev",
+		"docs:check-links": "cd docs && mintlify broken-links",
+		"docs:rename-file": "cd docs && mintlify rename",
+		"report-issue": "node scripts/report-issue.js"
 	},
 	"devDependencies": {
 		"@changesets/cli": "^2.27.12",
@@ -338,6 +365,7 @@
 		"eslint": "^8.57.0",
 		"grpc-tools": "^1.13.0",
 		"husky": "^9.1.7",
+		"mintlify": "^4.0.515",
 		"npm-run-all": "^4.1.5",
 		"prettier": "^3.3.3",
 		"protoc-gen-ts": "^0.8.7",
@@ -383,6 +411,7 @@
 		"globby": "^14.0.2",
 		"iconv-lite": "^0.6.3",
 		"ignore": "^7.0.3",
+		"image-size": "^2.0.2",
 		"isbinaryfile": "^5.0.2",
 		"jschardet": "^3.1.4",
 		"mammoth": "^1.8.0",
