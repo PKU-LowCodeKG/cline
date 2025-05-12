@@ -66,7 +66,7 @@ export class Controller {
 	workspaceTracker: WorkspaceTracker
 	mcpHub: McpHub
 	accountService: ClineAccountService
-	private latestAnnouncementId = "may-02-2025_16:27:00" // update to some unique identifier when we add a new announcement
+	private latestAnnouncementId = "may-09-2025_17:11:00" // update to some unique identifier when we add a new announcement
 
 	constructor(
 		readonly context: vscode.ExtensionContext,
@@ -274,6 +274,9 @@ export class Controller {
 			case "condense":
 				this.task?.handleWebviewAskResponse("yesButtonClicked")
 				break
+			case "reportBug":
+				this.task?.handleWebviewAskResponse("yesButtonClicked")
+				break
 			case "apiConfiguration":
 				if (message.apiConfiguration) {
 					await updateApiConfiguration(this.context, message.apiConfiguration)
@@ -330,9 +333,6 @@ export class Controller {
 				break
 			case "resetState":
 				await this.resetState()
-				break
-			case "refreshRequestyModels":
-				await this.refreshRequestyModels()
 				break
 			case "refreshClineRules":
 				await refreshClineRulesToggles(this.context, cwd)
@@ -1146,6 +1146,7 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 		return cacheDir
 	}
 
+	// Read OpenRouter models from disk cache
 	async readOpenRouterModels(): Promise<Record<string, ModelInfo> | undefined> {
 		const openRouterModelsFilePath = path.join(await this.ensureCacheDirectoryExists(), GlobalFileNames.openRouterModels)
 		const fileExists = await fileExistsAtPath(openRouterModelsFilePath)
@@ -1154,51 +1155,6 @@ Here is the project's README to help you get started:\n\n${mcpDetails.readmeCont
 			return JSON.parse(fileContents)
 		}
 		return undefined
-	}
-
-	async refreshRequestyModels() {
-		const parsePrice = (price: any) => {
-			if (price) {
-				return parseFloat(price) * 1_000_000
-			}
-			return undefined
-		}
-
-		let models: Record<string, ModelInfo> = {}
-		try {
-			const apiKey = await getSecret(this.context, "requestyApiKey")
-			const headers = {
-				Authorization: `Bearer ${apiKey}`,
-			}
-			const response = await axios.get("https://router.requesty.ai/v1/models", { headers })
-			if (response.data?.data) {
-				for (const model of response.data.data) {
-					const modelInfo: ModelInfo = {
-						maxTokens: model.max_output_tokens || undefined,
-						contextWindow: model.context_window,
-						supportsImages: model.supports_vision || undefined,
-						supportsPromptCache: model.supports_caching || undefined,
-						inputPrice: parsePrice(model.input_price),
-						outputPrice: parsePrice(model.output_price),
-						cacheWritesPrice: parsePrice(model.caching_price),
-						cacheReadsPrice: parsePrice(model.cached_price),
-						description: model.description,
-					}
-					models[model.id] = modelInfo
-				}
-				console.log("Requesty models fetched", models)
-			} else {
-				console.error("Invalid response from Requesty API")
-			}
-		} catch (error) {
-			console.error("Error fetching Requesty models:", error)
-		}
-
-		await this.postMessageToWebview({
-			type: "requestyModels",
-			requestyModels: models,
-		})
-		return models
 	}
 
 	// Context menus and code actions
