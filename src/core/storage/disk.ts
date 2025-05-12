@@ -6,7 +6,7 @@ import { fileExistsAtPath } from "@utils/fs"
 import { ClineMessage } from "@shared/ExtensionMessage"
 import { TaskMetadata } from "@core/context/context-tracking/ContextTrackerTypes"
 import os from "os"
-import { execa } from "execa"
+import { execa } from "@packages/execa"
 
 /**
  * Cline 的全局文件名
@@ -28,6 +28,9 @@ export const GlobalFileNames = {
 	/** 存放 Cline 的 MCP 设置文件 */
 	mcpSettings: "cline_mcp_settings.json",
 	clineRules: ".clinerules",
+	cursorRulesDir: ".cursor/rules",
+	cursorRulesFile: ".cursorrules",
+	windsurfRules: ".windsurfrules",
 	taskMetadata: "task_metadata.json",
 }
 

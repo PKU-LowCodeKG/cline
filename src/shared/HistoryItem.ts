@@ -12,4 +12,5 @@ export type HistoryItem = {
 	size?: number
 	shadowGitConfigWorkTree?: string
 	conversationHistoryDeletedRange?: [number, number]
+	isFavorited?: boolean
 }

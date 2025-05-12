@@ -33,6 +33,8 @@ export const toolUseNames = [
 	"attempt_completion",
 	"new_task",
 	"condense",
+	"report_bug",
+	"new_rule",
 ] as const
 
 // Converts array of tool call names into a union type ("execute_command" | "read_file" | ...)
@@ -60,6 +62,11 @@ export const toolParamNames = [
 	"response",
 	"result",
 	"context",
+	"title",
+	"what_happened",
+	"steps_to_reproduce",
+	"api_request_output",
+	"additional_context",
 ] as const
 
 /** Cline 定义的 ToolUse Assistant Message 的参数对象键值 */
